@@ -1,0 +1,10 @@
+[package]
+name = "photo-cli"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+photo-core = { path = "../photo-core" }
+interprocess = "2.4.4"
+serde_json = "1"

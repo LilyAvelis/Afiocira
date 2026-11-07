@@ -1,0 +1,58 @@
+name: Windows package validation
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows-x64:
+    runs-on: windows-2025
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        shell: pwsh
+        run: |
+          choco install zig --version=0.15.2 --yes --no-progress
+          choco install innosetup --version=6.7.1 --yes --no-progress
+          $env:PATH = "C:\ProgramData\chocolatey\bin;$env:PATH"
+          zig version
+      - name: Build release binaries
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\ProgramData\chocolatey\bin;$env:PATH"
+          $sep = [char]31
+          $env:CARGO_ENCODED_RUSTFLAGS = '-C' + $sep + 'target-feature=+crt-static' + $sep + "--remap-path-prefix=$env:GITHUB_WORKSPACE=WORKSPACE" + $sep + '--remap-path-prefix=C:\Users\runneradmin=BUILD_USER'
+          cargo build --locked --release --workspace --target-dir target/remapped
+      - name: Stage pinned dependencies and test
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\ProgramData\chocolatey\bin;$env:PATH"
+          ./scripts/stage-windows-release.ps1
+          $env:PATH = "$(Resolve-Path target/package-stage/yazi);$env:PATH"
+          $env:APPDATA = "$(Resolve-Path target)/ci-empty-appdata"
+          $env:LOCALAPPDATA = "$(Resolve-Path target)/ci-empty-localappdata"
+          New-Item -ItemType Directory -Path $env:APPDATA,$env:LOCALAPPDATA -Force | Out-Null
+          Remove-Item Env:YAZI_FILE_ONE -ErrorAction SilentlyContinue
+          cargo test --locked --workspace
+      - name: Compile installer and checksum
+        shell: pwsh
+        run: |
+          $iscc = @(
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+            'C:\Program Files\Inno Setup 6\ISCC.exe'
+          ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $iscc) { throw 'Inno Setup compiler not found' }
+          & $iscc scripts/Afiocira.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-FileHash target/setup/Afiocira-Setup-Windows11-x64.exe -Algorithm SHA256 |
+            ForEach-Object { "SHA256 $($_.Hash) Afiocira-Setup-Windows11-x64.exe" } |
+            Set-Content -Path target/setup/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Afiocira-Windows11-x64-candidate
+          path: |
+            target/setup/Afiocira-Setup-Windows11-x64.exe
+            target/setup/SHA256SUMS.txt
+          if-no-files-found: error

@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/photo-core", "crates/photo-cli", "crates/photo-gui"]
+resolver = "3"
