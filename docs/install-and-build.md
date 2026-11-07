@@ -2,7 +2,7 @@
 
 Afiocira currently targets Windows 11 x64 with a working OpenGL driver. The installer is unsigned and may trigger SmartScreen. It installs for the current user, bundles Yazi 26.5.6 and the Microsoft Visual C++ Redistributable, creates shortcuts, and registers **Open with** for decoded image formats. It does not change default file associations. Its uninstaller removes its own shortcuts and registration.
 
-The public installer is pending an independent Windows 11 test, license review of Yazi's bundled dependencies, and a successful GitHub Actions run. The older `scripts/install-windows.ps1` and `scripts/unregister-windows.ps1` are development helpers for previous builds and use the `photo-gui.exe` registration.
+The first public installer is a test build. Independent Windows 11 installation and a successful GitHub Actions run remain unverified. The older `scripts/install-windows.ps1` and `scripts/unregister-windows.ps1` are development helpers for previous builds and use the `photo-gui.exe` registration.
 
 ## Building
 
@@ -16,4 +16,4 @@ Build `photo-cli` alongside the GUI. `photo-cli list <folder>` lists supported i
 
 ## Dependency notices
 
-The [Rust dependency report](../licenses/THIRD_PARTY_RUST.html) was generated from Cargo.lock with `cargo about generate --workspace --locked --fail about.hbs --output-file licenses/THIRD_PARTY_RUST.html`. Lucide and egui-lucide notices are in `licenses/`; Yazi's own license is packaged. Yazi's transitive notices still require review before a public binary release.
+The [Afiocira Rust dependency report](../licenses/THIRD_PARTY_RUST.html) was generated from Cargo.lock with `cargo about generate --workspace --locked --fail about.hbs --output-file licenses/THIRD_PARTY_RUST.html`. The [Yazi dependency report](../licenses/THIRD_PARTY_YAZI.html) was generated from the tagged Yazi 26.5.6 Cargo.lock using `about-yazi.hbs`; Yazi's own license is packaged. Lucide and egui-lucide notices are in `licenses/`.

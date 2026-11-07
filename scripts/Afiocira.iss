@@ -3,7 +3,7 @@
 [Setup]
 AppId=Afiocira.LilyAvelis
 AppName=Afiocira
-AppVersion=0.1.0-alpha
+AppVersion=1.0.0
 AppPublisher=LilyAvelis
 DefaultDirName={localappdata}\Programs\Afiocira
 DefaultGroupName=Afiocira

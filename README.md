@@ -10,7 +10,7 @@ The left panel is [Yazi](https://yazi-rs.github.io/), a real file manager embedd
 
 ## Try it on Windows 11
 
-The Windows installer is being tested privately before the first public Release. There is no public download yet. Once the independent installation test is complete, the installer will appear under [Releases](../../releases). It will include Yazi; you will not need Rust, Zig or a separate Yazi setup.
+Download the **Windows 11 installer** from [Releases](../../releases). Version 1.0.0 is the first public test build. It includes Yazi; you will not need Rust, Zig or a separate Yazi setup. Independent testing on another Windows 11 PC is still in progress.
 
 After installing, open Afiocira and choose a folder of images, or use **Open with → Afiocira** on a picture. The installer does not replace your default photo app. Afiocira works with ordinary local folders; iCloud Photos is one possible source, not a requirement.
 
@@ -35,7 +35,7 @@ The app is written in Rust with egui. Its keyboard controls and local CLI/API us
 
 ## Project
 
-Afiocira's source code is [MIT licensed](LICENSE). Third-party components keep their own licenses; [Rust dependency notices](licenses/THIRD_PARTY_RUST.html) and other packaged notices are available in `licenses/`.
+Afiocira's source code is [MIT licensed](LICENSE). Third-party components keep their own licenses; [Afiocira's Rust notices](licenses/THIRD_PARTY_RUST.html) and [bundled Yazi dependency notices](licenses/THIRD_PARTY_YAZI.html) are available in `licenses/`.
 
 Lilia conceived the product, directed its interaction design and tested it in daily use. GPT-6.1 Sol designed and wrote the Rust viewer, its GUI, local API and Yazi integration in collaboration with her. Other AI models contributed independent reviews and release preparation. This is a human–AI collaboration, with the implementation contribution named directly.
 
