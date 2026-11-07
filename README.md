@@ -1,5 +1,7 @@
 # Afiocira
 
+Created by **Lilia Avelis and GPT-6.1 Sol**.
+
 **A photo gallery with a file manager at its side.** Open a folder, see its pictures together, and move between the gallery and your files without losing your place.
 
 Afiocira began with a simple frustration: viewing a large collection on Windows should not mean opening photos one by one in File Explorer or importing everything into a separate library. Here, any folder can become a gallery. Open a picture to look closer, then return to the same place in the grid.
@@ -33,6 +35,8 @@ The app is written in Rust with egui. Its keyboard controls and local CLI/API us
 
 ## Project
 
-Afiocira's source code is [MIT licensed](LICENSE). Third-party components keep their own licenses; [Rust dependency notices](licenses/THIRD_PARTY_RUST.html) and other packaged notices are available in `licenses/`. AI tools, including GPT-6.1 Sol, assisted development and review.
+Afiocira's source code is [MIT licensed](LICENSE). Third-party components keep their own licenses; [Rust dependency notices](licenses/THIRD_PARTY_RUST.html) and other packaged notices are available in `licenses/`.
+
+Lilia conceived the product, directed its interaction design and tested it in daily use. GPT-6.1 Sol designed and wrote the Rust viewer, its GUI, local API and Yazi integration in collaboration with her. Other AI models contributed independent reviews and release preparation. This is a human–AI collaboration, with the implementation contribution named directly.
 
 The project grew from Lilia's [photo workshop in the Golden Garden](https://app.notion.com/p/41149fda329681e0b7fcfc89dcba8db8). The Garden holds the product story and next ideas; this repository holds the code and its current technical behavior.
