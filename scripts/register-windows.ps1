@@ -1,6 +1,6 @@
-﻿param(
+param(
     [string]$Executable,
-    [string]$ShortcutName = 'Afiocira.lnk',
+    [string]$ShortcutName = 'Локальная фотомастерская.lnk',
     [string]$StartFolder,
     [switch]$SkipOpenWith
 )
@@ -23,7 +23,7 @@ $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $appPath
 $shortcut.Arguments = if ($StartFolder) { '"{0}"' -f $StartFolder } else { '' }
 $shortcut.WorkingDirectory = $projectDirectory
-$shortcut.Description = 'Open Afiocira'
+$shortcut.Description = 'Открыть галерею фотографий'
 $shortcut.IconLocation = "$appPath,0"
 $shortcut.Save()
 
@@ -35,7 +35,7 @@ if (-not $SkipOpenWith) {
     $typesKey = Join-Path $applicationKey 'SupportedTypes'
     New-Item -Path $commandKey -Force | Out-Null
     New-Item -Path $typesKey -Force | Out-Null
-    New-ItemProperty -Path $applicationKey -Name 'FriendlyAppName' -Value 'Afiocira' -PropertyType String -Force | Out-Null
+    New-ItemProperty -Path $applicationKey -Name 'FriendlyAppName' -Value 'Локальная фотомастерская' -PropertyType String -Force | Out-Null
     Set-Item -Path $commandKey -Value ('"{0}" "%1"' -f $appPath)
     foreach ($extension in @('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff')) {
         New-ItemProperty -Path $typesKey -Name $extension -Value '' -PropertyType String -Force | Out-Null

@@ -1,7 +1,7 @@
-﻿param(
+param(
     [string]$Executable,
     [string]$StartFolder,
-    [string]$ShortcutName = 'Afiocira.lnk'
+    [string]$ShortcutName = 'Локальная фотомастерская — Yazi.lnk'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,6 +15,19 @@ $installed = Join-Path $installDirectory ("photo-gui-$hash.exe")
 New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
 if (-not (Test-Path -LiteralPath $installed)) {
     Copy-Item -LiteralPath $source -Destination $installed
+}
+
+# Local video builds carry the pinned runtime alongside the GUI. Do not replace
+# a different DLL underneath a running older build.
+foreach ($runtimeName in @('libmpv-2.dll', 'ffmpeg.exe')) {
+    $runtime = Join-Path (Split-Path -Parent $source) $runtimeName
+    $target = Join-Path $installDirectory $runtimeName
+    if (Test-Path -LiteralPath $runtime) {
+        if (-not (Test-Path -LiteralPath $target) -or
+            (Get-FileHash -LiteralPath $runtime).Hash -ne (Get-FileHash -LiteralPath $target).Hash) {
+            Copy-Item -LiteralPath $runtime -Destination $target -Force
+        }
+    }
 }
 
 $register = Join-Path $PSScriptRoot 'register-windows.ps1'

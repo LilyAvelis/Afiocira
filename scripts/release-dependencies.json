@@ -1,0 +1,22 @@
+{
+  "font": {
+    "version": "3.5.1",
+    "url": "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/JetBrainsMono.zip",
+    "archive_sha256": "fab782a66f7d3019da64f6572db9fc5d3a4bcb19f9fa13e2d8a62e3693d6396e"
+  },
+  "ffmpeg": {
+    "version": "8.1.2-full_build-www.gyan.dev",
+    "url": "https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-full_build.7z",
+    "exe_sha256": "ad8f211bc894755e0061c55ab280ae00e8d3d4f15a8cc4372b24cfa247b5942e",
+    "archive_sha256": "0fff188997a499b5382e0f66e845d4556c48c54f0113ebed4853d556dbdd7059"
+  },
+  "yazi": {
+    "version": "26.5.6",
+    "url": "https://github.com/sxyazi/yazi/releases/download/v26.5.6/yazi-x86_64-pc-windows-msvc.zip",
+    "archive_sha256": "6c6c52a4b2648e179f917bdaa7c57e793d18561b380a8bfa025f10cd1b9b2ad1"
+  },
+  "vc_redist": {
+    "url": "https://aka.ms/vc14/vc_redist.x64.exe",
+    "sha256": "843068991daaa1f73ad9f6239bce4d0f6a07a51f18c37ea2a867e9beca71295c"
+  }
+}

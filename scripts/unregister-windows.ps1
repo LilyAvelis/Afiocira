@@ -1,5 +1,5 @@
-﻿param(
-    [string]$ShortcutName = 'Afiocira.lnk'
+param(
+    [string]$ShortcutName = 'Локальная фотомастерская — Yazi.lnk'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,7 +10,7 @@ $installed = if (Test-Path -LiteralPath $appPathsKey) {
     (Get-Item -LiteralPath $appPathsKey).GetValue('')
 } else { $null }
 if (-not $installed -or -not $installed.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-    Write-Output 'No Afiocira registration in the install directory.'
+    Write-Output 'No Photo Workshop registration in the install directory.'
     exit 0
 }
 $applicationKey = 'HKCU:\Software\Classes\Applications\photo-gui.exe'

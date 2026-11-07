@@ -1,37 +1,76 @@
-# Afiocira
+# Afiocira 2.0
 
 Created by **Lilia Avelis and GPT-6.1 Sol**.
 
-**A photo gallery with a file manager at its side.** Open a folder, see its pictures together, and move between the gallery and your files without losing your place.
+A Windows photo and video gallery with a real embedded Yazi file manager, fast Everything search and keyboard-first actions.
 
-Afiocira began with a simple frustration: viewing a large collection on Windows should not mean opening photos one by one in File Explorer or importing everything into a separate library. Here, any folder can become a gallery. Open a picture to look closer, then return to the same place in the grid.
+## Download and run
 
-The left panel is [Yazi](https://yazi-rs.github.io/), a real file manager embedded in the window. Browse folders, sort, select, rename or move files with Yazi; press **Tab** to take the current picture and selection into the gallery. Press Tab again to return to those files. You can also use the gallery on its own.
+Download the **2.0.0 Windows x64 installer** or portable ZIP from [Releases](https://github.com/LilyAvelis/Afiocira/releases/tag/v2.0.0). Windows11 x64 with an OpenGL-capable driver is the tested platform. The installer is unsigned. It installs for the current user and adds Open With entries without changing your defaults.
 
-## Try it on Windows 11
+The package carries Yazi26.5.6, the Everything ES helper, a Nerd Font and notices. The installer downloads the pinned libmpv and FFmpeg distributions directly from upstream for video support (Internet required). Portable users run **Enable-Video.cmd** once before starting Afio to enable video playback and thumbnails. Everything itself must be installed and running to enable indexed search; the gallery works without it. For the portable ZIP, extract the whole folder, install the included Microsoft VC++ runtime if needed, and launch **Afiocira.exe**. Keep its adjacent runtime files/folders together.
 
-Download the **Windows 11 installer** from [Releases](../../releases). Version 1.0.0 is the first public test build. It includes Yazi; you will not need Rust, Zig or a separate Yazi setup. Independent testing on another Windows 11 PC is still in progress.
+## What's in 2.0
 
-After installing, open Afiocira and choose a folder of images, or use **Open with → Afiocira** on a picture. The installer does not replace your default photo app. Afiocira works with ordinary local folders; iCloud Photos is one possible source, not a requirement.
+- Mixed photo/video gallery and Space viewer: libmpv playback, audio, pause, seeking and volume; FFmpeg video thumbnails.
+- Raycast-inspired Actions menus for Gallery and Space, with vector icons and keyboard-operated forms.
+- Ctrl+click independent selection, Shift range selection and selection synchronization with Yazi.
+- Ctrl+C copies one or many files, with pixel clipboard data for a single supported image; Ctrl+V imports files or image pixels into the current folder.
+- Ctrl+D duplicates; F2 renames one file; Delete uses the Windows Recycle Bin, with Enter confirmation for groups.
+- Drag a folder or media files into Afio to open them.
+- Ctrl+Shift+K searches Everything and opens files/folders directly in Afio/Yazi.
+- Named album rows for nested folders, independent horizontal cursors and bounded lazy loading.
+- Space actions resize/compress to a new copy or convert PNG/JPEG/WebP with checked replacement.
+- Cache-preserving rename, deletion and reordering; centered thumbnails and narrow-window Fit.
 
-## A few things to try
+## Keyboard
 
-| What you want | How |
-| --- | --- |
-| Open a picture from the grid | Click it, or select it with arrows and press **Space** or **Enter** |
-| Return to the grid | **Space** or **Esc** |
-| Look closer at a detail | Scroll over it; **Ctrl + scroll** zooms around the center; drag to pan; **Fit** resets |
-| Move between Yazi and the gallery | **Tab**; the current file and marked pictures follow you |
-| Mark several pictures | **Shift + arrows** or **Shift + click** in the gallery; **Esc** clears gallery marks |
-| Change the gallery's order | Sort in Yazi; the gallery follows its order |
+| Context | Keys | Result |
+| --- | --- | --- |
+| Everywhere | Ctrl+K | Contextual Actions |
+| Everywhere | Ctrl+Shift+K | Everything search |
+| Gallery / Yazi | Tab | Switch pane and synchronize context |
+| Ordinary Gallery | Arrows; Shift+arrows | Cursor; range selection |
+| Album overview | Left/Right | Browse and continue this album |
+| Album overview | Up/Down | Change album; restore its cursor |
+| Album overview | Enter | Enter the album's local grid at the same file |
+| Gallery | Space | Open current image/video |
+| Space | Space / Esc | Return to Gallery |
+| Space | Left/Right; P | Adjacent file; video pause/play |
+| File actions | Ctrl+C/V/D, F2, Delete | Copy/paste/duplicate, rename, recycle |
+| Forms | Tab / Shift+Tab; Space; Enter; Esc | Cycle controls; toggle; apply; cancel |
 
-Yazi also supports keyboard and mouse navigation and your existing Yazi configuration. Its file operations act on your real files, and Afiocira cannot undo them.
+In an album overview, Tab highlights that **album folder** in its parent in Yazi. In an ordinary local grid or Space, Tab reveals the current **file**. Own Yazi settings/themes stay intact: Afio creates a private session configuration.
 
-## What this version is
+## Boundaries
 
-This is an early viewer, not yet an image editor. It reads PNG, JPEG, WebP, GIF, BMP and TIFF, including EXIF orientation. HEIC, HEIF and AVIF previews, animated playback, full color management and true original-pixel zoom are not implemented. Preview images are limited to 2560 pixels on their longest side. Image editing and local AI tools are ideas for later stages, not features of this release.
+Image previews support PNG/JPEG/WebP/GIF/BMP/TIFF with EXIF orientation. HEIC/HEIF/AVIF are recognized in listings but not decoded yet. No ICC-managed display, animated-image playback, full-resolution1:1 mode, batch F2, shortcut customization, general undo or drag-out is claimed.
 
-The app is written in Rust with egui. Its keyboard controls and local CLI/API use the same commands, so an agent can work with the open viewer. See [how it works](docs/architecture.md), [Yazi behavior](docs/yazi-navigation.md), [build and installation notes](docs/install-and-build.md), and the [public release checklist](docs/release-readiness.md) for technical details.
+Nested browsing counts the immediate level only; pages are bounded and deeper directories require exploration. Image conversion currently accepts static8-bit PNG/JPEG/WebP; unsupported animation/alpha/precision cases are rejected. Converting replaces the source after verification; use Ctrl+D first to keep a separate original. Metadata removal requires explicit permission. Resize creates a new unique copy. Recovery files may remain after an interrupted conversion.
+
+The local API controls the first GUI owning the default Windows pipe; set AFIO_API_NAME for an isolated instance. It is not a network service or a multi-session discovery protocol.
+
+## Build
+
+Install Rust/MSVC build tools and Zig0.15.2, then:
+
+```powershell
+cargo build --locked --release --workspace
+./scripts/setup-video.ps1 -OutputDirectory target/release
+./scripts/setup-everything.ps1 -OutputDirectory target/release
+./target/release/photo-gui.exe 'C:\Photos'
+./target/release/photo-cli.exe ctl status
+```
+
+Release packaging: [docs/release-2.0.md](docs/release-2.0.md). Runtime dependencies are pinned and checksummed; see their notices in the package. Afio's code is MIT licensed; external components retain their own licenses.
+
+For development, `scripts/update-working.ps1` updates the permanent Afiocira desktop shortcut via a launcher and immutable working-version directories. It does not overwrite an already open GUI.
+
+## Technical notes
+
+[Architecture](docs/architecture.md) · [Yazi](docs/yazi-navigation.md) · [Video](docs/video.md) · [Actions](docs/actions.md) · [Clipboard/rename/drop](docs/import-and-rename.md) · [Delete](docs/delete.md) · [Latency](docs/delete-performance.md) · [Everything](docs/everything.md) · [Albums and image actions](docs/nested-and-image-actions.md) · [Terminal colors](docs/terminal-colors.md).
+
+All GUI, keyboard, CLI and native API commands share one dispatcher. The Windows release was checked with129 unit/native tests,3 doctests, strict Clippy and isolated native API scenarios. Those checks do not certify every codec, filesystem or machine.
 
 ## Project
 

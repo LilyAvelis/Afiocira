@@ -1,3 +1,6 @@
 [workspace]
-members = ["crates/photo-core", "crates/photo-cli", "crates/photo-gui"]
+members = ["crates/photo-core", "crates/photo-cli", "crates/photo-gui", "crates/photo-launcher", "vendor/egui_tty"]
 resolver = "3"
+
+[patch.crates-io]
+egui_tty = { path = "vendor/egui_tty" }

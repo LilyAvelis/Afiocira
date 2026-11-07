@@ -1,6 +1,10 @@
 # Architecture checkpoint after Terra review
 
-This document records the implementation boundaries at the current checkpoint. This is a working navigation prototype, not a finished editor.
+Video is now embedded through libmpv; see [video checkpoint](video.md) for its
+rendering, runtime, asynchronous commands, validation and current limits.
+The historical `Photo`, `photos` and `View::Photo` names now also cover movies.
+The image-only decode limits below still describe still-image previews.
+
 
 ## Ownership and flow
 
@@ -39,11 +43,11 @@ Protocol version is `3`; the pipe name and Rust types are in `photo-core/src/api
 | Yazi hover | `preview_folder` | `ctl-json` |
 | Refresh button or F5 | `refresh` | `ctl refresh` |
 
-For example, `photo-cli ctl status` reports the active frame, and `photo-cli ctl open-selected` changes that same session. `ctl-json` accepts a single line such as `{"command":"status"}` from stdin. The GUI handles API requests on its UI thread, so commands are serialized with input and rendering. The pipe accepts at most eight simultaneous clients and a 16 MiB JSON command frame. A stalled connected client can occupy one of these slots until it disconnects; no read timeout is implemented. API transport is local to the machine; it is not an HTTP service or a remote automation endpoint. The transport does not yet provide authentication beyond Windows pipe access control.
+For example, `photo-cli ctl status` reports the active frame, and `photo-cli ctl open-selected` changes that same session. `ctl-json` accepts a single line such as `{"command":"status"}` from stdin. The GUI handles API requests on its UI thread, so commands are serialized with input and rendering. API transport is local to the machine; it is not an HTTP service or a remote automation endpoint. The transport does not yet provide authentication beyond Windows pipe access control.
 
 ## File and Yazi boundary
 
-Yazi remains a full file manager. Its rename, move and delete actions are external to Afiocira. Its sort keys report Yazi's actual ordered file paths through a private plugin; the gallery applies them through `set_order` and preserves selection and decoded textures by path. The private keymap keeps the user's bindings and augments sort actions; global Yazi config is untouched. Mouse clicks reach Yazi as SGR reports, and a GUI double click enters the hovered folder. The app uses nonrecursive filesystem notifications, a 350 ms debounce, and `Gallery::refresh` to reconcile the current folder. Selection is restored by path when possible. If the open file disappears, the view returns to the grid. If files are inserted or removed, image caches are invalidated; modifying one file invalidates that image. The watcher may miss events or be unavailable, so `ctl refresh` forces a rescan.
+Yazi remains a full file manager. Its rename, move and delete actions are external to Photo Workshop. Its sort keys report Yazi's actual ordered file paths through a private plugin; the gallery applies them through `set_order` and preserves selection and decoded textures by path. The private keymap keeps the user's bindings and augments sort actions; global Yazi config is untouched. Mouse clicks reach Yazi as SGR reports, and a GUI double click enters the hovered folder. The app uses nonrecursive filesystem notifications, a 350 ms debounce, and `Gallery::refresh` to reconcile the current folder. Selection is restored by path when possible. If the open file disappears, the view returns to the grid. If files are inserted or removed, image caches are invalidated; modifying one file invalidates that image. The watcher may miss events or be unavailable, so `ctl refresh` forces a rescan.
 
 There is no app file-write command or undo journal yet. Do not claim that Yazi actions are undoable through this app. Before adding move/rename/delete, define conflict handling, source identity/version checks, cross-volume behavior and interruption recovery, then test them in temporary folders. A future AI job must bind to immutable source path/version, not the current grid index.
 

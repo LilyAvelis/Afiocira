@@ -2,11 +2,13 @@
 
 Afiocira currently targets Windows 11 x64 with a working OpenGL driver. The installer is unsigned and may trigger SmartScreen. It installs for the current user, bundles Yazi 26.5.6 and the Microsoft Visual C++ Redistributable, creates shortcuts, and registers **Open with** for decoded image formats. It does not change default file associations. Its uninstaller removes its own shortcuts and registration.
 
-The first public installer is a test build. Independent Windows 11 installation and a successful GitHub Actions run remain unverified. The older `scripts/install-windows.ps1` and `scripts/unregister-windows.ps1` are development helpers for previous builds and use the `photo-gui.exe` registration.
+The 2.0 installer follows the original public 1.0 test build. Independent Windows 11 installation and a successful GitHub Actions run remain unverified. The older `scripts/install-windows.ps1` and `scripts/unregister-windows.ps1` are development helpers for previous builds and use the `photo-gui.exe` registration.
+
+Video components are fetched directly from upstream by the installer. Portable users run Enable-Video.cmd once before starting Afio; this step requires Internet access.
 
 ## Building
 
-Developers need Rust, Windows MSVC build tools, Zig 0.15.x and Inno Setup 6. Build with `cargo build --locked --release --workspace --target-dir target/remapped`, enabling static CRT and source-path remapping as shown in [the Windows workflow](../.github/workflows/windows-package.yml). Then run `scripts/stage-windows-release.ps1` and compile `scripts/Afiocira.iss` with `ISCC.exe`. The staging script downloads pinned Yazi and Visual C++ packages, verifies SHA-256 and includes synthetic test images. The workflow uploads an installer candidate and its SHA-256; it does not publish a Release. End users do not need these build tools.
+Developers need Rust, Windows MSVC build tools, Zig 0.15.x and Inno Setup 6. Build with `cargo build --locked --release --workspace --target-dir target/distribution`, enabling static CRT and source-path remapping as shown in [the Windows workflow](../.github/workflows/windows-package.yml). Then run `scripts/stage-windows-release.ps1` and compile `scripts/Afiocira.iss` with `ISCC.exe`. The staging script downloads pinned Yazi and Visual C++ packages, verifies SHA-256 and includes synthetic test images. The workflow uploads an installer candidate; it does not publish a Release. End users do not need these build tools.
 
 Inno Setup's current compiler is for non-commercial use; commercial installer distribution requires revisiting its license or choosing another installer technology.
 

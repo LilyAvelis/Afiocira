@@ -1,5 +1,5 @@
 use interprocess::local_socket::{GenericNamespaced, Stream, prelude::*};
-use photo_core::api::{Command, Pane, Response, SOCKET_NAME};
+use photo_core::api::{Command, Pane, Response, socket_name};
 use photo_core::{Point, Size};
 use std::env;
 use std::ffi::OsString;
@@ -53,6 +53,87 @@ fn main() -> ExitCode {
 fn control(args: &[OsString]) -> ExitCode {
     let command = match args {
         [action] if action == "status" => Command::Status,
+        [action] if action == "enter-album" => Command::EnterAlbum,
+        [action] if action == "navigator-snapshot" => Command::NavigatorSnapshot,
+        [action] if action == "nested" => Command::LoadNested { deeper: false },
+        [action] if action == "deeper" => Command::LoadNested { deeper: true },
+        [action] if action == "cancel-image" => Command::CancelImage,
+        [action] if action == "search" => Command::ShowSearch,
+        [action] if action == "close-search" => Command::CloseSearch,
+        [action, query] if action == "search-files" => Command::SearchFiles {
+            query: query.to_string_lossy().into_owned(),
+        },
+        [action, index] if action == "open-result" => {
+            let Some(index) = index.to_str().and_then(|s| s.parse().ok()) else {
+                return failure(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Expected result index",
+                ));
+            };
+            Command::OpenSearchResult { index }
+        }
+        [action] if action == "commands" => Command::ListCommands,
+        [action] if action == "paste" => Command::RunAction {
+            id: photo_core::actions::ActionId::Paste,
+        },
+        [action] if action == "delete" => Command::RunAction {
+            id: photo_core::actions::ActionId::Delete,
+        },
+        [action] if action == "confirm-delete" => Command::ConfirmDelete,
+        [action] if action == "cancel-delete" => Command::CancelDelete,
+        [action] if action == "begin-rename" => Command::BeginRename,
+        [action] if action == "cancel-rename" => Command::CancelRename,
+        [action, name] if action == "rename" => Command::Rename {
+            new_name: name.to_string_lossy().into_owned(),
+        },
+        [action, paths @ ..] if action == "import" => Command::ImportFiles {
+            paths: paths.iter().map(Into::into).collect(),
+        },
+        [action, paths @ ..] if action == "drop-open" => Command::OpenDropped {
+            paths: paths.iter().map(Into::into).collect(),
+        },
+        [action] if action == "actions" => Command::ShowCommands,
+        [action] if action == "close-actions" => Command::CloseCommands,
+        [action, query] if action == "search-actions" => Command::SearchCommands {
+            query: query.to_string_lossy().into_owned(),
+        },
+        [action] if action == "duplicate" => Command::RunAction {
+            id: photo_core::actions::ActionId::Duplicate,
+        },
+        [action] if action == "copy" => Command::RunAction {
+            id: photo_core::actions::ActionId::Copy,
+        },
+        [action, id] if action == "action" => {
+            let id = serde_json::from_value(serde_json::Value::String(
+                id.to_string_lossy().into_owned(),
+            ));
+            let Ok(id) = id else {
+                return failure(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Unknown action id",
+                ));
+            };
+            Command::RunAction { id }
+        }
+        [action] if action == "video-play" => Command::VideoPause { paused: false },
+        [action] if action == "video-pause" => Command::VideoPause { paused: true },
+        [action, value] if action == "video-seek" || action == "video-volume" => {
+            let Some(value) = value
+                .to_str()
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|v| v.is_finite())
+            else {
+                return failure(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Expected a finite number",
+                ));
+            };
+            if action == "video-seek" {
+                Command::VideoSeek { seconds: value }
+            } else {
+                Command::VideoVolume { volume: value }
+            }
+        }
         [action] if action == "list-order" => Command::ListOrder,
         [action, path] if action == "open" => Command::Open { path: path.into() },
         [action, index] if action == "select" => {
@@ -63,6 +144,13 @@ fn control(args: &[OsString]) -> ExitCode {
             Command::Select { index }
         }
         [action, path] if action == "select-path" => Command::SelectPath { path: path.into() },
+        [action, index] if action == "toggle-selection" => {
+            let Some(index) = index.to_str().and_then(|value| value.parse().ok()) else {
+                print_usage();
+                return ExitCode::FAILURE;
+            };
+            Command::ToggleSelection { index }
+        }
         [action, index] if action == "extend-selection" => {
             let Some(index) = index.to_str().and_then(|value| value.parse().ok()) else {
                 print_usage();
@@ -175,7 +263,8 @@ fn run_live_command(command: &Command) -> ExitCode {
 }
 
 fn send_to_gui(command: &Command) -> io::Result<Response> {
-    let name = SOCKET_NAME.to_ns_name::<GenericNamespaced>()?;
+    let socket = socket_name();
+    let name = socket.to_ns_name::<GenericNamespaced>()?;
     let mut stream = Stream::connect(name)?;
     serde_json::to_writer(&mut stream, command)?;
     stream.write_all(b"\n")?;
@@ -330,7 +419,7 @@ fn parse_os_values<const N: usize>(values: [&OsString; N]) -> Option<[f32; N]> {
 
 fn print_usage() {
     eprintln!(
-        "Usage: photo-cli list <folder> | browse <folder> | open <file> | ctl <status|list-order|open PATH|select INDEX|select-path PATH|extend-selection INDEX|mark [PATH ...]|order [PATH ...]|open-selected|next|previous|back|refresh|show-navigator|hide-navigator|focus-gallery|focus-navigator|zoom FACTOR X Y VIEW_W VIEW_H FIT_W FIT_H|pan DX DY VIEW_W VIEW_H FIT_W FIT_H|reset-zoom> | ctl-json < JSON_COMMAND"
+        "Usage: photo-cli list <folder> | browse <folder> | open <file> | ctl <status|list-order|open PATH|select INDEX|select-path PATH|extend-selection INDEX|toggle-selection INDEX|mark [PATH ...]|order [PATH ...]|open-selected|next|previous|back|refresh|show-navigator|hide-navigator|focus-gallery|focus-navigator|zoom FACTOR X Y VIEW_W VIEW_H FIT_W FIT_H|pan DX DY VIEW_W VIEW_H FIT_W FIT_H|reset-zoom|commands|actions|close-actions|search-actions QUERY|action ID|copy|duplicate|paste|delete|confirm-delete|cancel-delete|begin-rename|rename NEW_NAME|cancel-rename|import PATH...|drop-open PATH...|video-play|video-pause|video-seek SECONDS|video-volume 0..100> | ctl-json < JSON_COMMAND"
     );
 }
 

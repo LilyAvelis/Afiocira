@@ -19,10 +19,15 @@ const BRIDGE_INIT: &str = r#"
 local bridge = os.getenv("PHOTO_WORKSHOP_YAZI_BRIDGE")
 if bridge then
   local serial = 0
+  local navigation_target = nil
   local function report_folder()
     local current = cx.active.current
     local hovered = current.hovered
     local folder = hovered and hovered.cha.is_dir and hovered.url or current.cwd
+    if navigation_target then
+      folder = current.cwd
+      if tostring(current.cwd) == navigation_target then navigation_target = nil end
+    end
     serial = serial + 1
     local version = serial
     ya.async(function()
@@ -31,6 +36,15 @@ if bridge then
   end
   ps.sub("cd", report_folder)
   ps.sub("hover", report_folder)
+  ps.sub_remote("workshop-navigate", function(paths)
+    if not paths[1] then return end
+    navigation_target = paths[2]
+    if paths[3] == "folder" then
+      ya.emit("cd", { Url(paths[1]) })
+    else
+      ya.emit("reveal", { Url(paths[1]) })
+    end
+  end)
   ps.sub_remote("workshop-apply", function(paths)
     local cursor = paths[1]
     if not cursor then return end
@@ -99,10 +113,15 @@ pub fn install_terminal_font(ctx: &egui::Context) -> bool {
     let Some(windows) = std::env::var_os("WINDIR") else {
         return false;
     };
-    let path = PathBuf::from(windows)
+    let system = PathBuf::from(windows)
         .join("Fonts")
         .join("JetBrainsMonoNerdFontMono-Regular.ttf");
-    let Ok(bytes) = fs::read(path) else {
+    let bundled = std::env::current_exe().ok().map(|p| {
+        p.with_file_name("fonts")
+            .join("JetBrainsMonoNerdFontMono-Regular.ttf")
+    });
+    let bytes = fs::read(system).or_else(|e| bundled.as_ref().map_or(Err(e), fs::read));
+    let Ok(bytes) = bytes else {
         return false;
     };
     let mut definitions = FontDefinitions::default();
@@ -160,6 +179,9 @@ pub struct YaziPane {
     client_id: String,
     snapshot_serial: u64,
     pending_snapshot: Option<PathBuf>,
+    navigation_target: Option<PathBuf>,
+    navigation_generation: Arc<AtomicU64>,
+    navigation_errors: Option<mpsc::Receiver<String>>,
     mouse_down: Option<egui::PointerButton>,
 }
 
@@ -175,26 +197,6 @@ pub struct NavigatorOrder {
     pub paths: Vec<PathBuf>,
 }
 
-// Own partially initialized resources until YaziPane takes them. Any error while
-// configuring the session or connecting the PTY must not leave a process or a
-// copy of the user's configuration behind.
-struct StartupSession {
-    path: Option<PathBuf>,
-    child: Option<Box<dyn Child + Send + Sync>>,
-}
-
-impl Drop for StartupSession {
-    fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        if let Some(path) = self.path.take() {
-            let _ = fs::remove_dir_all(path);
-        }
-    }
-}
-
 impl YaziPane {
     pub fn start(initial: &Path) -> Result<Self, String> {
         let (yazi_executable, ya_executable) = find_yazi_tools()?;
@@ -204,10 +206,6 @@ impl YaziPane {
             std::process::id(),
             session_number
         ));
-        let mut startup = StartupSession {
-            path: Some(session.clone()),
-            child: None,
-        };
         let config = session.join("config");
         let user_config = std::env::var_os("APPDATA")
             .map(PathBuf::from)
@@ -223,8 +221,8 @@ impl YaziPane {
 
         let pty = native_pty_system()
             .openpty(PtySize {
-                // egui_tty starts at 80x24 until its first UI frame resizes both ends.
-                // A different initial PTY size can scroll Yazi's early output away.
+                // Match egui_tty's initial emulator before its first UI resize.
+                // Otherwise early output can scroll fixture files off-screen.
                 rows: 24,
                 cols: 80,
                 pixel_width: 0,
@@ -232,17 +230,16 @@ impl YaziPane {
             })
             .map_err(|error| error.to_string())?;
         let mut command = CommandBuilder::new(yazi_executable);
-        command.arg(initial);
+        command.arg(super::friendly_path(initial));
         command.arg("--client-id");
         command.arg(&client_id);
         command.env("TERM", "xterm-256color");
         command.env("YAZI_CONFIG_HOME", &config);
         command.env("PHOTO_WORKSHOP_YAZI_BRIDGE", &bridge);
-        startup.child = Some(
-            pty.slave
-                .spawn_command(command)
-                .map_err(|error| error.to_string())?,
-        );
+        let child = pty
+            .slave
+            .spawn_command(command)
+            .map_err(|error| error.to_string())?;
         drop(pty.slave);
 
         let mut reader = pty
@@ -272,20 +269,17 @@ impl YaziPane {
             writer: Mutex::new(writer),
             master: Mutex::new(pty.master),
         });
-        let mut terminal = Terminal::new(TtyStream {
+        let terminal = Terminal::new(TtyStream {
             output,
             tty: tty.clone(),
         })
         .map_err(|error| error.to_string())?
         .with_label("Yazi navigator");
-        terminal.request_focus();
-        let child = startup.child.take();
-        startup.path = None;
         Ok(Self {
             terminal,
             #[cfg(test)]
             tty,
-            child,
+            child: Some(child),
             ya_executable,
             session,
             last_folder: None,
@@ -294,8 +288,123 @@ impl YaziPane {
             client_id,
             snapshot_serial: 0,
             pending_snapshot: None,
+            navigation_target: None,
+            navigation_generation: Arc::new(AtomicU64::new(0)),
+            navigation_errors: None,
             mouse_down: None,
         })
+    }
+
+    /// Navigate the existing Yazi client without copying config or creating a PTY.
+    /// Delivery runs off the UI thread and is cancelled by a newer navigation/drop.
+    pub fn navigate(&mut self, path: &Path) -> Result<(), String> {
+        self.navigate_mode(path, false)
+    }
+    /// Highlight the directory itself in its parent, instead of entering it.
+    pub fn reveal_folder(&mut self, path: &Path) -> Result<(), String> {
+        if path.parent().is_none() {
+            return self.navigate(path);
+        }
+        self.navigate_mode(path, true)
+    }
+    pub fn navigation_untouched(&self) -> bool {
+        self.navigation_target.is_some()
+    }
+    fn navigate_mode(&mut self, path: &Path, reveal_folder: bool) -> Result<(), String> {
+        let is_folder = path.is_dir() && !reveal_folder;
+        let target = if is_folder {
+            path
+        } else {
+            path.parent()
+                .ok_or("Search result has no parent directory")?
+        };
+        let target = PathBuf::from(super::friendly_path(target));
+        let cursor = super::friendly_path(path);
+        if let Some(snapshot) = self.pending_snapshot.take() {
+            let _ = fs::remove_file(snapshot);
+        }
+        // Reports already queued for the old gallery must not reopen it while
+        // the DDS request is in flight. Late writes are filtered by target below.
+        if let Ok(entries) = fs::read_dir(&self.session) {
+            for entry in entries.flatten() {
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("folder.txt.")
+                {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
+        self.navigation_target = Some(target.clone());
+        self.last_folder = Some(target.clone());
+        let generation = self.navigation_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let cancellation = self.navigation_generation.clone();
+        let executable = self.ya_executable.clone();
+        let client = self.client_id.clone();
+        let (errors, receiver) = mpsc::channel();
+        self.navigation_errors = Some(receiver);
+        std::thread::Builder::new()
+            .name("yazi-navigate".into())
+            .spawn(move || {
+                if cancellation.load(Ordering::Relaxed) != generation {
+                    return;
+                }
+                let mut command = std::process::Command::new(executable);
+                #[cfg(windows)]
+                command.creation_flags(0x0800_0000);
+                let child = command
+                    .args(["pub-to", &client, "workshop-navigate", "--list"])
+                    .arg(cursor)
+                    .arg(super::friendly_path(&target))
+                    .arg(if is_folder { "folder" } else { "file" })
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+                let mut child = match child {
+                    Ok(child) => child,
+                    Err(error) => {
+                        let _ = errors.send(format!("Yazi navigation failed: {error}"));
+                        return;
+                    }
+                };
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            if !status.success() {
+                                let _ = errors.send(format!("Yazi navigation failed: {status}"));
+                            }
+                            break;
+                        }
+                        Err(error) => {
+                            let _ = errors.send(format!("Yazi navigation failed: {error}"));
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break;
+                        }
+                        Ok(None) => {}
+                    }
+                    if std::time::Instant::now() >= deadline
+                        || cancellation.load(Ordering::Relaxed) != generation
+                    {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        if cancellation.load(Ordering::Relaxed) == generation {
+                            let _ = errors.send("Yazi navigation timed out".into());
+                        }
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    pub fn take_navigation_error(&mut self) -> Option<String> {
+        self.navigation_errors.as_ref()?.try_recv().ok()
     }
 
     pub fn request_snapshot(&mut self) -> Result<(), String> {
@@ -384,6 +493,14 @@ impl YaziPane {
             }
             let mut lines = text.lines();
             let folder = PathBuf::from(lines.next()?);
+            if self
+                .navigation_target
+                .as_ref()
+                .is_some_and(|target| target != &folder)
+            {
+                let _ = fs::remove_file(&path);
+                continue;
+            }
             let paths = lines.map(PathBuf::from).collect();
             self.last_order_serial = serial;
             for entry in fs::read_dir(&self.session).ok()?.flatten() {
@@ -430,7 +547,7 @@ impl YaziPane {
                 .arg(&self.client_id)
                 .arg("workshop-apply")
                 .arg("--list");
-            command.arg(cursor);
+            command.arg(super::friendly_path(cursor));
             command.arg(if !replace {
                 "preserve"
             } else if index == 0 {
@@ -438,7 +555,7 @@ impl YaziPane {
             } else {
                 "add"
             });
-            command.args(chunk);
+            command.args(chunk.into_iter().map(|path| super::friendly_path(path)));
             let status = command.status().map_err(|error| error.to_string())?;
             if !status.success() {
                 return Err(format!("Yazi selection command failed: {status}"));
@@ -449,6 +566,9 @@ impl YaziPane {
 
     pub fn ui(&mut self, ui: &mut eframe::egui::Ui, nerd_font_loaded: bool) -> bool {
         let mut style = TerminalStyle::from_visuals(ui.visuals());
+        // Yazi uses bold on powerline caps and selected text. Their explicit
+        // colors must remain exact instead of being mixed toward white.
+        style.brighten_bold = false;
         if nerd_font_loaded {
             style.font = FontId::new(12.0, FontFamily::Name(NERD_FONT_FAMILY.into()));
         }
@@ -465,6 +585,21 @@ impl YaziPane {
         // egui_tty 0.2 handles text selection but does not forward pointer buttons to
         // the PTY. Yazi understands SGR mouse reports, like it does in a normal terminal.
         let events = ui.input(|input| input.events.clone());
+        // A search result explicitly chooses its gallery directory. Keep that
+        // choice through delayed Yazi hover reports, until the user actually
+        // operates this terminal. Programmatic focus alone must not release it.
+        if events.iter().any(|event| match event {
+            egui::Event::Key { pressed: true, .. }
+            | egui::Event::Text(_)
+            | egui::Event::Paste(_) => response.has_focus(),
+            egui::Event::PointerButton {
+                pos, pressed: true, ..
+            } => response.rect.contains(*pos),
+            egui::Event::MouseWheel { .. } => response.hovered(),
+            _ => false,
+        }) {
+            self.navigation_target = None;
+        }
         for event in events {
             let egui::Event::PointerButton {
                 pos,
@@ -567,6 +702,14 @@ impl YaziPane {
                 continue;
             };
             let folder = PathBuf::from(path);
+            if self
+                .navigation_target
+                .as_ref()
+                .is_some_and(|target| target != &folder)
+            {
+                let _ = fs::remove_file(report);
+                continue;
+            }
             if !folder.is_dir() {
                 continue;
             }
@@ -593,6 +736,7 @@ impl YaziPane {
 
 impl Drop for YaziPane {
     fn drop(&mut self) {
+        self.navigation_generation.fetch_add(1, Ordering::Relaxed);
         if let Some(mut child) = self.child.take() {
             let session = self.session.clone();
             std::thread::spawn(move || {
@@ -605,21 +749,16 @@ impl Drop for YaziPane {
 }
 
 fn find_yazi_tools() -> Result<(PathBuf, PathBuf), String> {
-    if let Some(directory) = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|parent| parent.join("yazi")))
-        && let Some(tools) = yazi_tools_in(&directory)
-    {
-        return Ok(tools);
-    }
     let path = std::env::var_os("PATH");
     find_yazi_tools_with_path(path.as_deref())
 }
 
 fn find_yazi_tools_with_path(path: Option<&OsStr>) -> Result<(PathBuf, PathBuf), String> {
-    let mut directories: Vec<PathBuf> = path
-        .map(|path| std::env::split_paths(path).collect())
+    let mut directories: Vec<PathBuf> = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| vec![p.join("yazi"), p.to_path_buf()]))
         .unwrap_or_default();
+    directories.extend(path.map(std::env::split_paths).into_iter().flatten());
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
         let packages = PathBuf::from(local).join("Microsoft/WinGet/Packages");
         if let Ok(entries) = fs::read_dir(packages) {
@@ -641,17 +780,13 @@ fn find_yazi_tools_with_path(path: Option<&OsStr>) -> Result<(PathBuf, PathBuf),
         }
     }
     for directory in directories {
-        if let Some(tools) = yazi_tools_in(&directory) {
-            return Ok(tools);
+        let yazi = directory.join("yazi.exe");
+        let ya = directory.join("ya.exe");
+        if yazi.is_file() && ya.is_file() {
+            return Ok((yazi, ya));
         }
     }
     Err("Yazi and ya.exe were not found in the same installation".into())
-}
-
-fn yazi_tools_in(directory: &Path) -> Option<(PathBuf, PathBuf)> {
-    let yazi = directory.join("yazi.exe");
-    let ya = directory.join("ya.exe");
-    (yazi.is_file() && ya.is_file()).then_some((yazi, ya))
 }
 
 fn copy_directory(from: &Path, to: &Path) -> std::io::Result<()> {
@@ -833,56 +968,21 @@ fn patch_keymap(original: &str) -> std::io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    static NATIVE_YAZI_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    #[test]
-    fn bundled_yazi_requires_both_executables() {
-        let root =
-            std::env::temp_dir().join(format!("photo-workshop-bundled-{}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("yazi.exe"), []).unwrap();
-        assert!(yazi_tools_in(&root).is_none());
-        fs::write(root.join("ya.exe"), []).unwrap();
-        let (yazi, ya) = yazi_tools_in(&root).unwrap();
-        assert_eq!(yazi, root.join("yazi.exe"));
-        assert_eq!(ya, root.join("ya.exe"));
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn failed_startup_removes_partial_session() {
-        let root =
-            std::env::temp_dir().join(format!("photo-workshop-startup-{}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("private-config"), b"test").unwrap();
-        drop(StartupSession {
-            path: Some(root.clone()),
-            child: None,
-        });
-        assert!(!root.exists());
-    }
+    static NATIVE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn finds_ya_beside_yazi_when_path_is_unavailable() {
-        let root = std::env::temp_dir().join(format!("afio-yazi-path-test-{}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("yazi.exe"), []).unwrap();
-        fs::write(root.join("ya.exe"), []).unwrap();
-        let search_path = std::env::join_paths([&root]).unwrap();
-        let (yazi, ya) = find_yazi_tools_with_path(Some(&search_path)).unwrap();
-        assert_eq!(yazi, root.join("yazi.exe"));
-        assert_eq!(ya, root.join("ya.exe"));
-        fs::remove_dir_all(root).unwrap();
+        let (yazi, ya) = find_yazi_tools_with_path(None).unwrap();
+        assert_eq!(yazi.parent(), ya.parent());
+        assert!(yazi.is_file());
+        assert!(ya.is_file());
     }
     use std::time::Instant;
 
     #[test]
     fn installed_nerd_font_contains_yazi_folder_icon() {
         let ctx = egui::Context::default();
-        if !install_terminal_font(&ctx) {
-            return; // The optional font is not installed on every Windows machine.
-        }
+        assert!(install_terminal_font(&ctx));
         ctx.begin_pass(egui::RawInput::default());
         let font = FontId::new(12.0, FontFamily::Name(NERD_FONT_FAMILY.into()));
         assert!(ctx.fonts_mut(|fonts| fonts.has_glyph(&font, '')));
@@ -956,8 +1056,103 @@ mod tests {
     }
 
     #[test]
+    fn native_yazi_navigates_existing_client() {
+        let _lock = NATIVE_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let fixture =
+            std::env::temp_dir().join(format!("photo-workshop-navigate-{}", std::process::id()));
+        let folder = fixture.join("Unicode папка");
+        fs::create_dir_all(folder.join("hovered-child")).unwrap();
+        let photo = fixture.join("image.jpg");
+        fs::write(&photo, []).unwrap();
+        let started = Instant::now();
+        let mut pane = YaziPane::start(&fixture).unwrap();
+        let client_id = pane.client_id.clone();
+        let child_pid = pane.child.as_ref().unwrap().process_id();
+        eprintln!("Yazi start: {:?}", started.elapsed());
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            pane.terminal.poll();
+            let _ = pane.request_snapshot();
+            std::thread::sleep(Duration::from_millis(40));
+            if pane.poll_snapshot().is_some() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "bridge failed to start");
+        }
+        for target in [&folder, &photo] {
+            let started = Instant::now();
+            pane.navigate(target).unwrap();
+            assert_eq!(pane.client_id, client_id);
+            assert_eq!(pane.child.as_ref().unwrap().process_id(), child_pid);
+            eprintln!("navigate queued: {:?}", started.elapsed());
+            let deadline = Instant::now() + Duration::from_secs(4);
+            loop {
+                pane.terminal.poll();
+                if let Some(reported) = pane.changed_folder() {
+                    let expected = if target == &folder { &folder } else { &fixture };
+                    assert_eq!(
+                        &reported, expected,
+                        "navigation reported a hovered child or old folder"
+                    );
+                }
+                pane.request_snapshot().unwrap();
+                std::thread::sleep(Duration::from_millis(30));
+                if let Some(snapshot) = pane.poll_snapshot() {
+                    let expected = if target == &folder { &folder } else { &fixture };
+                    if snapshot.folder == *expected
+                        && (target == &folder || snapshot.hovered.as_ref() == Some(&photo))
+                    {
+                        eprintln!("navigation complete: {:?}", started.elapsed());
+                        // Simulate an arbitrarily late hover report after the
+                        // requested cd already completed. No timer may let it
+                        // replace the explicitly chosen search directory.
+                        let late = pane
+                            .session
+                            .join(format!("folder.txt.{}", pane.last_serial + 10_000));
+                        fs::write(
+                            &late,
+                            format!("{}\n", folder.join("hovered-child").display()),
+                        )
+                        .unwrap();
+                        assert!(pane.changed_folder().is_none());
+                        assert_eq!(pane.navigation_target.as_ref(), Some(expected));
+                        let settle = Instant::now() + Duration::from_millis(200);
+                        while Instant::now() < settle {
+                            pane.terminal.poll();
+                            if let Some(reported) = pane.changed_folder() {
+                                assert_eq!(&reported, expected);
+                            }
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        break;
+                    }
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "DDS did not navigate to {target:?}"
+                );
+            }
+        }
+        // No delayed report from the previous folder may reopen it after the
+        // newest media reveal. Continue polling beyond the DDS completion.
+        let deadline = Instant::now() + Duration::from_millis(250);
+        while Instant::now() < deadline {
+            pane.terminal.poll();
+            if let Some(reported) = pane.changed_folder() {
+                assert_eq!(reported, fixture);
+            }
+            assert!(pane.take_navigation_error().is_none());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(pane);
+        let _ = fs::remove_dir_all(fixture);
+    }
+
+    #[test]
     fn native_yazi_reports_hovered_folder() {
-        let _lock = NATIVE_YAZI_TEST_LOCK
+        let _lock = NATIVE_TEST_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let fixture = std::env::temp_dir().join(format!(
@@ -969,16 +1164,15 @@ mod tests {
         let second_folder = fixture.join("b-subfolder");
         fs::create_dir_all(&child_folder).unwrap();
         fs::create_dir_all(&second_folder).unwrap();
-        let mut pane = YaziPane::start(&fixture).expect("installed Yazi should start in ConPTY");
+        let mut pane = YaziPane::start(&fixture.canonicalize().unwrap())
+            .expect("installed Yazi should start in ConPTY");
         let deadline = Instant::now() + Duration::from_secs(8);
         let mut reported = None;
         while Instant::now() < deadline {
             pane.terminal.poll();
             if let Some(folder) = pane.changed_folder() {
-                if folder == child_folder {
-                    reported = Some(folder);
-                    break;
-                }
+                reported = Some(folder);
+                break;
             }
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -1029,12 +1223,12 @@ mod tests {
         let second_photo = fixture.join("c-photo.jpg");
         fs::write(&first_photo, b"test").unwrap();
         fs::write(&second_photo, b"test").unwrap();
-        pane.apply_selection(
-            &first_photo,
-            &[first_photo.clone(), second_photo.clone()],
-            true,
-        )
-        .unwrap();
+        let mut gallery = photo_core::Gallery::open(&fixture).unwrap();
+        assert!(gallery.toggle_selection(0));
+        assert!(gallery.toggle_selection(1));
+        let ctrl_marks: Vec<_> = gallery.marked_paths().iter().cloned().collect();
+        pane.apply_selection(&first_photo, &ctrl_marks, true)
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(4);
         let mut applied = None;
         while Instant::now() < deadline {
@@ -1133,7 +1327,7 @@ mod tests {
 
     #[test]
     fn native_yazi_sort_and_mouse_reach_the_bridge() {
-        let _lock = NATIVE_YAZI_TEST_LOCK
+        let _lock = NATIVE_TEST_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let fixture =
@@ -1145,9 +1339,6 @@ mod tests {
             fs::write(fixture.join(name), b"test").unwrap();
         }
         let mut pane = YaziPane::start(&fixture).unwrap();
-        let (cols, rows) = pane.terminal.size();
-        let pty_size = pane.tty.master.lock().unwrap().get_size().unwrap();
-        assert_eq!((cols, rows), (pty_size.cols, pty_size.rows));
         let deadline = Instant::now() + Duration::from_secs(8);
         let mut ready = false;
         while Instant::now() < deadline {

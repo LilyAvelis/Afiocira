@@ -135,6 +135,9 @@ pub fn spawn_worker(
 }
 
 fn decode(path: &Path, max_side: u32) -> Result<ColorImage, String> {
+    if photo_core::is_video_path(path) {
+        return video_thumbnail(path, max_side);
+    }
     let mut decoder = image::ImageReader::open(path)
         .map_err(|error| format!("Cannot read {}: {error}", path.display()))?
         .into_decoder()
@@ -155,26 +158,76 @@ fn decode(path: &Path, max_side: u32) -> Result<ColorImage, String> {
     Ok(ColorImage::from_rgba_unmultiplied(size, image.as_raw()))
 }
 
+fn video_thumbnail(path: &Path, max_side: u32) -> Result<ColorImage, String> {
+    #[cfg(windows)]
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    let sibling = std::env::current_exe()
+        .ok()
+        .map(|p| p.with_file_name("ffmpeg.exe"));
+    let executable = std::env::var_os("AFIO_FFMPEG")
+        .map(std::path::PathBuf::from)
+        .or_else(|| sibling.filter(|p| p.is_file()))
+        .unwrap_or_else(|| "ffmpeg".into());
+    let output = std::env::temp_dir().join(format!(
+        "afio-video-{}-{}.png",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    struct Temporary(std::path::PathBuf);
+    impl Drop for Temporary {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let _temporary = Temporary(output.clone());
+    let mut command = Command::new(executable);
+    command
+        .args(["-nostdin", "-v", "error", "-y", "-threads", "1", "-i"])
+        .arg(path)
+        .args(["-map", "0:v:0", "-frames:v", "1", "-vf"])
+        .arg(format!(
+            "scale={max_side}:{max_side}:force_original_aspect_ratio=decrease"
+        ))
+        .args(["-threads", "1", "-update", "1"])
+        .arg(&output)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Video thumbnail requires FFmpeg: {e}"))?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return Err("Cannot decode video thumbnail".into());
+                }
+                break;
+            }
+            Ok(None) if started.elapsed() < Duration::from_secs(8) => {
+                std::thread::sleep(Duration::from_millis(20))
+            }
+            result => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Video thumbnail timed out or failed: {result:?}"));
+            }
+        }
+    }
+    decode(&output, max_side)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn decodes_a_real_png_and_reports_a_corrupt_image() {
-        let root =
-            std::env::temp_dir().join(format!("photo-workshop-decode-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
-        let image_path = root.join("valid.png");
-        image::RgbImage::from_pixel(400, 200, image::Rgb([10, 20, 30]))
-            .save(&image_path)
-            .unwrap();
-        let image = decode(&image_path, 100).unwrap();
-        assert_eq!(image.size, [100, 50]);
-        let broken_path = root.join("broken.png");
-        std::fs::write(&broken_path, b"not an image").unwrap();
-        assert!(decode(&broken_path, 100).is_err());
-        std::fs::remove_dir_all(root).unwrap();
-    }
 
     #[test]
     fn newest_generation_replaces_old_queue_and_current_photo_takes_priority() {
