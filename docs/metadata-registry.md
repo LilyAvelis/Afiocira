@@ -3,9 +3,8 @@
 The Registry now backs a catalogue-driven **Ctrl+G Metadata** side panel in
 Gallery and Space. Session history and editing are described in
 [session editing](session-editing.md). There is no virtual Gallery, dataset
-export or reconciliation UI yet. The application and
-published 2.5 release keep their existing version numbers; `photo-registry` is
-the new 3.0 component. No existing settings are migrated into SQLite.
+export or reconciliation UI yet. The application and Registry are version 3.0.0.
+No existing settings are migrated into SQLite.
 
 ## Sparse indexing is the contract
 

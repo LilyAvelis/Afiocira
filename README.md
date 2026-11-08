@@ -1,4 +1,4 @@
-# Afiocira 2.5
+# Afiocira 3.0
 
 Created by **Lilia Avelis and GPT-6.1 Sol**.
 
@@ -6,11 +6,22 @@ A Windows photo and video gallery with a real embedded Yazi file manager, fast E
 
 ## Download and run
 
-Download the **2.5.0 Windows x64 installer** or portable ZIP from [v2.5.0](https://github.com/LilyAvelis/Afiocira/releases/tag/v2.5.0). Windows11 x64 with an OpenGL-capable driver is the tested platform. The installer is unsigned. It installs for the current user and adds Open With entries without changing your defaults.
+Download the **3.0.0 Windows x64 installer** or portable ZIP from [v3.0.0](https://github.com/LilyAvelis/Afiocira/releases/tag/v3.0.0). Windows11 x64 with an OpenGL-capable driver is the tested platform. The installer is unsigned. It installs for the current user and adds Open With entries without changing your defaults.
 
 The package carries Yazi26.5.6, the Everything ES helper, a Nerd Font and notices. The installer downloads the pinned libmpv and FFmpeg distributions directly from upstream for video support (Internet required). Portable users run **Enable-Video.cmd** once before starting Afio to enable video playback and thumbnails. Everything itself must be installed and running to enable indexed search; the gallery works without it. For the portable ZIP, extract the whole folder, install the included Microsoft VC++ runtime if needed, and launch **Afiocira.exe**. Keep its adjacent runtime files/folders together.
 
-## What's in 2.5
+## What's new in 3.0
+
+- Sparse SQLite metadata: save tags, comments and descriptions without importing or indexing a library.
+- Ctrl+G reads embedded XMP/EXIF/IPTC/color information and generation metadata, including complete ComfyUI workflow JSON.
+- Ctrl+H session history with visible thumbnails, read-only version preview, exact undo/redo and explicit Ctrl+S forward truncation.
+- Separate Light and Color, Details and Vignette tools with live preview, fifteen controls and a tone curve.
+- Copy folder/file paths with Ctrl+L and the Gallery cursor path with Ctrl+Shift+L; optional copy confirmations.
+- Keyboard/metadata UX repairs, including modifier recording, conflict controls and Escape recovery from Yazi focus.
+
+History is temporary on SSD and does not survive a normal restart; user-saved metadata persists. Next: 3.1 refines Ctrl+G UX, 3.2 adds optional persistent history. Executing ComfyUI workflows remains future work. See [3.0 scope and limits](docs/release-3.0.md).
+
+## Retained from 2.5
 
 - Native Settings (Ctrl+,), Afio shortcut customization and Action Panel shortcut assignment (Ctrl+Shift+,).
 - Yazi themes/flavors, icons, General settings, Quicklinks and inline keybinding recording; Yazi-only Dark/Light and Shift+Tab file details.
@@ -84,20 +95,20 @@ Windows checks, dependency caches and tagged publication are automated. Ordinary
 commits run checks; a matching version tag builds and publishes verified Windows
 packages. See [CI/CD and release procedure](docs/ci-cd.md).
 
-The source targets **2.5.0**. See [release notes and validation](docs/release-2.5.md)
+The source targets **3.0.0**. See [release notes and validation](docs/release-3.0.md)
 and [Settings](docs/settings.md) for complete scope and application guards.
 The historical [2.0 release record](docs/release-2.0.md) remains available.
 
 ## Technical notes
 
-The 3.0 development branch adds explicitly sparse SQLite metadata, a Ctrl+G
+The 3.0 release adds explicitly sparse SQLite metadata, a Ctrl+G
 side panel, Ctrl+H session history with undo/redo and explicit forward truncation,
 and separate light/color, detail and vignette tools. Ctrl+G also reads supported
 embedded XMP/EXIF/IPTC/color information and ComfyUI workflow data without
 registering the image. Ctrl+L copies the folder/file path; Ctrl+Shift+L copies
 the Gallery cursor file path. See [session editing](docs/session-editing.md) and
 [Metadata Registry](docs/metadata-registry.md) for commands, verification and
-current limits. This development stage is separate from the 2.5 release scope.
+current limits. The historical [2.5 release scope](docs/release-2.5.md) remains available.
 
 [Architecture](docs/architecture.md) · [Yazi](docs/yazi-navigation.md) · [Video](docs/video.md) · [Actions](docs/actions.md) · [Clipboard/rename/drop](docs/import-and-rename.md) · [Delete](docs/delete.md) · [Latency](docs/delete-performance.md) · [Everything](docs/everything.md) · [Albums and image actions](docs/nested-and-image-actions.md) · [Terminal colors](docs/terminal-colors.md).
 

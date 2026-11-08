@@ -2,7 +2,7 @@
 
 Afiocira currently targets Windows 11 x64 with a working OpenGL driver. The installer is unsigned and may trigger SmartScreen. It installs for the current user, bundles Yazi 26.5.6 and the Microsoft Visual C++ Redistributable, creates shortcuts, and registers **Open with** for decoded image formats. It does not change default file associations. Its uninstaller removes its own shortcuts and registration.
 
-The 2.5.0 installer and portable ZIP are available from [v2.5.0](https://github.com/LilyAvelis/Afiocira/releases/tag/v2.5.0), following the public 2.0 release. See [the release record](release-2.5.md) for validation details and [Actions](https://github.com/LilyAvelis/Afiocira/actions) for remote CI results. Independent installation on another unprepared Windows 11 machine remains unverified. The older `scripts/install-windows.ps1` and `scripts/unregister-windows.ps1` are development helpers for previous builds and use the `photo-gui.exe` registration.
+The current candidate targets 3.0.0 with intended tag `v3.0.0`. After successful tagged publication, its installer, portable ZIP and SHA256SUMS.txt will appear in [GitHub Releases](https://github.com/LilyAvelis/Afiocira/releases). See [the 3.0 verification record](release-3.0.md) and [Actions](https://github.com/LilyAvelis/Afiocira/actions) for actual validation/publication status. The [2.5 record](release-2.5.md) remains historical. Independent installation on another unprepared Windows 11 machine remains unverified. The older `scripts/install-windows.ps1` and `scripts/unregister-windows.ps1` are development helpers for previous builds and use the `photo-gui.exe` registration.
 
 Video components are fetched directly from upstream by the installer. Portable users run Enable-Video.cmd once before starting Afio; this step requires Internet access.
 
@@ -11,6 +11,8 @@ Video components are fetched directly from upstream by the installer. Portable u
 Developers need PowerShell 7 and Windows MSVC build tools. The project pins Rust in rust-toolchain.toml. Run `scripts/setup-ci-tools.ps1 -Installer` for the pinned Rust/Zig tools and a compatible Inno Setup 6 compiler, then `scripts/build-release.ps1` for a verified static-CRT, source-path-remapped candidate. Dependency downloads are pinned and SHA256-checked. Ordinary CI commits run checks; stable version tags build and publish verified packages after those checks pass. Manual package runs produce candidates without publication. See [CI/CD](ci-cd.md) for caches, retries and the release procedure. End users do not need build tools.
 
 Inno Setup's current compiler is for non-commercial use; commercial installer distribution requires revisiting its license or choosing another installer technology.
+
+The package version comes from the four application Cargo manifests through `scripts/release-version.ps1`; installer paths, stage names and assets follow it. Keep those versions aligned and supply `docs/releases/vX.Y.Z.md`. Push the source to main and require a green Windows check. Then run **Windows CI and release** with `workflow_dispatch` and `package=true` on that commit to create an unpublished verified candidate. After reviewing it, push a matching annotated stable tag: the tag path runs check → package → publish. For this candidate the intended tag is `v3.0.0` and notes file is `docs/releases/v3.0.0.md`. Manual runs do not publish; published tags must not be moved or reused.
 
 ## Local API
 

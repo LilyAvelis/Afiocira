@@ -1,7 +1,7 @@
-# Settings — Afiocira 2.5
+# Settings — Afiocira 3.0
 
-This document describes 2.5.0 source being prepared for release. See the
-[release record](release-2.5.md) for publication and validation status. Ctrl+, opens **Afiocira Settings**, a separate native window in the
+This document describes 3.0.0. See the
+[release record](release-3.0.md) for publication and validation status. Ctrl+, opens **Afiocira Settings**, a separate native window in the
 same process. Repeating it focuses that window; Escape or Close returns focus
 to the gallery. The gallery, command/dialog draft and live API session remain open.
 Navigation and search select the registered Afio and Yazi modules; search filters

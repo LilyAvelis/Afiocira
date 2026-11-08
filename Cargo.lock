@@ -1990,7 +1990,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "photo-cli"
-version = "2.5.0"
+version = "3.0.0"
 dependencies = [
  "interprocess",
  "photo-core",
@@ -2000,7 +2000,7 @@ dependencies = [
 
 [[package]]
 name = "photo-core"
-version = "2.5.0"
+version = "3.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2010,7 +2010,7 @@ dependencies = [
 
 [[package]]
 name = "photo-gui"
-version = "2.5.0"
+version = "3.0.0"
 dependencies = [
  "clipboard-win",
  "eframe",
@@ -2043,7 +2043,7 @@ dependencies = [
 
 [[package]]
 name = "photo-launcher"
-version = "2.5.0"
+version = "3.0.0"
 
 [[package]]
 name = "photo-registry"
