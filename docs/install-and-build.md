@@ -8,7 +8,7 @@ Video components are fetched directly from upstream by the installer. Portable u
 
 ## Building
 
-Developers need Rust, Windows MSVC build tools, Zig 0.15.x and Inno Setup 6. Build with `cargo build --locked --release --workspace --target-dir target/distribution`, enabling static CRT and source-path remapping as shown in [the Windows workflow](../.github/workflows/windows-package.yml). Then run `scripts/stage-windows-release.ps1` and compile `scripts/Afiocira.iss` with `ISCC.exe`. The staging script downloads pinned Yazi and Visual C++ packages, verifies SHA-256 and includes synthetic test images. The workflow uploads an installer candidate; it does not publish a Release. End users do not need these build tools.
+Developers need PowerShell 7 and Windows MSVC build tools. The project pins Rust in rust-toolchain.toml. Run `scripts/setup-ci-tools.ps1 -Installer` for the pinned Rust/Zig tools and a compatible Inno Setup 6 compiler, then `scripts/build-release.ps1` for a verified static-CRT, source-path-remapped candidate. Dependency downloads are pinned and SHA256-checked. Ordinary CI commits run checks; stable version tags build and publish verified packages after those checks pass. Manual package runs produce candidates without publication. See [CI/CD](ci-cd.md) for caches, retries and the release procedure. End users do not need build tools.
 
 Inno Setup's current compiler is for non-commercial use; commercial installer distribution requires revisiting its license or choosing another installer technology.
 

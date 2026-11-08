@@ -1,5 +1,7 @@
+#requires -Version 7.0
 param([string]$OutputDirectory = (Join-Path $PSScriptRoot '..\target\debug'))
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'ci-common.ps1')
 # Official voidtools ES, MIT licensed. No installer, index, or Everything settings changes.
 # Provenance: https://www.voidtools.com/downloads/
 # Protocol: https://www.voidtools.com/support/everything/command_line_interface/
@@ -11,12 +13,7 @@ $packages = @(
 )
 foreach ($package in $packages) {
     $archive = Join-Path $cache $package.Name
-    if (-not (Test-Path -LiteralPath $archive)) {
-        Invoke-WebRequest ('https://www.voidtools.com/' + $package.Name) -OutFile $archive
-    }
-    if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $package.Hash) {
-        throw ('Everything archive SHA-256 mismatch: ' + $package.Name)
-    }
+    Invoke-CheckedDownload ('https://www.voidtools.com/' + $package.Name) $archive $package.Hash
     Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $cache $package.Directory) -Force
 }
 Copy-Item -LiteralPath (Join-Path $cache 'binary\es.exe') -Destination (Join-Path $OutputDirectory 'es.exe') -Force
