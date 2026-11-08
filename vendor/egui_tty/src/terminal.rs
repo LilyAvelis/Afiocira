@@ -386,6 +386,9 @@ impl Terminal {
         report(self.resize(cols, rows, cell));
 
         let (response, painter) = ui.allocate_painter(available, Sense::click_and_drag());
+        // Glyph fallback can have wider ink than a terminal cell. Keep it inside
+        // this pane, including when the minimum grid exceeds the available size.
+        let painter = painter.with_clip_rect(painter.clip_rect().intersect(response.rect));
         // A drag as well as a click: selecting text is a drag, and a pointer that never
         // clicked would leave the terminal without the keyboard — so the copy that a selection
         // is made for would go to whatever had it instead.
@@ -762,10 +765,12 @@ impl Terminal {
                 .update(row)
                 .map_err(|error| Error::context("failed to walk the cells", error))?;
             let mut x = origin.x;
-            // One layout job per row: neighbouring cells that share a style become one run,
-            // so a full screen costs a handful of galleys rather than a couple of thousand.
-            let mut job = LayoutJob::default();
+            // Anchor each style run to the terminal columns. Fallback glyphs can
+            // have different advances; a row-wide galley drifts away from the
+            // fixed cell backgrounds and leaves gaps at selection/powerline caps.
             let mut run: Option<Run> = None;
+            let mut run_x = x;
+            let mut runs = Vec::new();
 
             while let Some(view) = cells.next() {
                 let selected = view.is_selected().unwrap_or(false);
@@ -823,9 +828,9 @@ impl Terminal {
                 if grapheme_count > 0 {
                     let _ = view.graphemes_utf8(&mut text);
                 }
-                // A blank cell still has to occupy its column in the row's layout.
-                let glyph = if text.is_empty() { " " } else { text.as_str() };
-
+                let width = view.raw_cell().and_then(|cell| cell.wide()).ok();
+                let spacer = matches!(width, Some(libghostty_vt::screen::CellWide::SpacerTail));
+                let wide = matches!(width, Some(libghostty_vt::screen::CellWide::Wide));
                 let cell_style = CellStyle {
                     fg,
                     bold,
@@ -833,25 +838,39 @@ impl Terminal {
                     underline,
                     strikethrough,
                 };
-                match &mut run {
-                    Some(current) if current.style == cell_style => current.text.push_str(glyph),
-                    Some(current) => {
-                        current.flush(&mut job, style);
-                        *current = Run::new(cell_style, glyph);
+                if run
+                    .as_ref()
+                    .is_some_and(|current| current.style != cell_style || wide || spacer)
+                    && let Some(current) = run.take()
+                {
+                    runs.push((run_x, current));
+                }
+                // A wide glyph already covers its tail column. Appending another
+                // blank there shifts every subsequent glyph one column to the right.
+                if !spacer {
+                    let glyph = if text.is_empty() { " " } else { text.as_str() };
+                    if let Some(current) = &mut run {
+                        current.text.push_str(glyph);
+                    } else {
+                        run_x = x;
+                        run = Some(Run::new(cell_style, glyph));
                     }
-                    None => run = Some(Run::new(cell_style, glyph)),
+                    if wide && let Some(current) = run.take() {
+                        runs.push((run_x, current));
+                    }
                 }
 
                 x += cell.x;
                 column_index += 1;
             }
 
-            if let Some(mut current) = run.take() {
-                current.flush(&mut job, style);
+            if let Some(current) = run.take() {
+                runs.push((run_x, current));
             }
-            if !job.sections.is_empty() {
-                let galley = painter.layout_job(job);
-                painter.galley(egui::pos2(origin.x, y), galley, default_fg);
+            // Paint all backgrounds before ink: a wide glyph spans the tail
+            // cell, whose background would otherwise erase its right half.
+            for (x, mut current) in runs {
+                current.paint(painter, egui::pos2(x, y), style);
             }
 
             let _ = row.set_dirty(false);
@@ -957,6 +976,13 @@ impl Run {
         }
     }
 
+    fn paint(&mut self, painter: &egui::Painter, origin: egui::Pos2, style: &TerminalStyle) {
+        let mut job = LayoutJob::default();
+        self.flush(&mut job, style);
+        let galley = painter.layout_job(job);
+        painter.galley(origin, galley, self.style.fg);
+    }
+
     fn flush(&mut self, job: &mut LayoutJob, style: &TerminalStyle) {
         if self.text.is_empty() {
             return;
@@ -1055,6 +1081,55 @@ mod tests {
         fn resize(&self, _cols: u16, _rows: u16) -> Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn wide_glyph_tail_and_style_changes_keep_text_on_terminal_columns() {
+        let (writer, output) = mpsc::channel();
+        let mut terminal = Terminal::new(TtyStream {
+            output,
+            tty: Arc::new(Recorder::default()) as Arc<dyn Tty>,
+        })
+        .unwrap();
+        let ctx = egui::Context::default();
+        let style = TerminalStyle::default();
+        // Initialize dimensions before emitting the synthetic terminal row.
+        let input = || egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 180.0))),
+            ..Default::default()
+        };
+        let mut cell = vec2(0.0, 0.0);
+        let mut origin = egui::Pos2::ZERO;
+        ctx.run_ui(input(), |ui| {
+            cell = cell_size(ui.painter(), &style.font);
+            origin = terminal.ui(ui, &style).rect.min + vec2(style.padding, style.padding);
+        })
+        .drop_without_applying_deltas();
+        writer
+            .send("\x1b[31mA照\x1b[32mB\x1b[0m".as_bytes().to_vec())
+            .unwrap();
+        let mut output = ctx.run_ui(input(), |ui| {
+            terminal.ui(ui, &style);
+        });
+        output.textures_delta.clear();
+        let mut seen_wide = false;
+        let mut seen_b = false;
+        for clipped in output.shapes {
+            if let egui::Shape::Text(text) = clipped.shape {
+                if text.galley.job.text == "照" {
+                    assert!((text.pos.x - origin.x - cell.x).abs() < 0.01);
+                    seen_wide = true;
+                }
+                if text.galley.job.text == "B" {
+                    assert!((text.pos.x - origin.x - 3.0 * cell.x).abs() < 0.01);
+                    seen_b = true;
+                }
+            }
+        }
+        assert!(
+            seen_wide && seen_b,
+            "expected separately anchored wide glyph and style run"
+        );
     }
 
     /// What one keystroke sends to the program: the physical key, the modifiers, and the text

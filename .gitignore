@@ -1,3 +1,5 @@
 /target/
 /.git-seed/
 **/.git-seed/
+**/__pycache__/
+*.pyc

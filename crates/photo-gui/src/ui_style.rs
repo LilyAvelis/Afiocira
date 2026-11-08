@@ -1,3 +1,4 @@
+use crate::ui_foundation::tokens;
 use eframe::egui::{self, Color32};
 
 pub(super) fn install(ctx: &egui::Context) {
@@ -15,22 +16,25 @@ pub(super) fn install(ctx: &egui::Context) {
         &mut visuals.widgets.hovered,
         &mut visuals.widgets.active,
     ] {
-        widget.corner_radius = egui::CornerRadius::same(6);
+        widget.corner_radius = egui::CornerRadius::same(tokens::CONTROL_RADIUS);
         widget.bg_stroke = egui::Stroke::NONE;
     }
     visuals.widgets.inactive.bg_fill = Color32::from_rgb(61, 61, 66);
     visuals.widgets.hovered.bg_fill = Color32::from_rgb(79, 79, 85);
     visuals.widgets.active.bg_fill = Color32::from_rgb(95, 95, 103);
-    visuals.window_corner_radius = egui::CornerRadius::same(12);
+    visuals.window_corner_radius = egui::CornerRadius::same(tokens::WINDOW_RADIUS);
     style.visuals = visuals;
-    style.spacing.item_spacing = egui::vec2(9.0, 8.0);
-    style.spacing.button_padding = egui::vec2(10.0, 6.0);
-    style
-        .text_styles
-        .insert(egui::TextStyle::Body, egui::FontId::proportional(14.0));
-    style
-        .text_styles
-        .insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
+    style.spacing.interact_size.y = tokens::CONTROL_HEIGHT;
+    style.spacing.item_spacing = egui::vec2(tokens::SM, tokens::SM);
+    style.spacing.button_padding = egui::vec2(tokens::SM, tokens::SM);
+    style.text_styles.insert(
+        egui::TextStyle::Body,
+        egui::FontId::proportional(tokens::BODY),
+    );
+    style.text_styles.insert(
+        egui::TextStyle::Button,
+        egui::FontId::proportional(tokens::BODY),
+    );
     ctx.set_theme(egui::Theme::Dark);
     ctx.set_style_of(egui::Theme::Dark, style);
 }
@@ -46,12 +50,12 @@ pub(super) fn keycap(ui: &mut egui::Ui, text: &str) {
         egui::Frame::new()
             .fill(Color32::from_white_alpha(12))
             .stroke(egui::Stroke::new(1.0, Color32::from_white_alpha(55)))
-            .corner_radius(4)
-            .inner_margin(egui::Margin::symmetric(4, 1))
+            .corner_radius(tokens::XS as u8)
+            .inner_margin(egui::Margin::symmetric(tokens::XS as i8, 1))
             .show(ui, |ui| {
                 ui.label(
                     egui::RichText::new(key)
-                        .size(11.0)
+                        .size(tokens::CAPTION)
                         .color(Color32::from_gray(220)),
                 );
             });
@@ -60,7 +64,10 @@ pub(super) fn keycap(ui: &mut egui::Ui, text: &str) {
 }
 
 pub(super) fn actions_button(ui: &mut egui::Ui, open: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(140.0, 30.0), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(140.0, tokens::CONTROL_HEIGHT),
+        egui::Sense::click(),
+    );
     ui.painter().rect_filled(
         rect,
         9.0,

@@ -2,6 +2,7 @@ use super::*;
 
 impl Workshop {
     pub(super) fn grid(&mut self, ui: &mut egui::Ui) {
+        self.gallery_scale_wheel(ui);
         self.nested_header(ui);
         if self.album_mode() {
             self.album_grid(ui);
@@ -22,7 +23,11 @@ impl Workshop {
             });
             return;
         }
-        let layout = grid_layout(ui.available_width(), ui.spacing().item_spacing);
+        let layout = grid_layout(
+            ui.available_width(),
+            ui.spacing().item_spacing,
+            self.settings.effective_gallery_scale(),
+        );
         let rows = count.div_ceil(layout.columns);
         let mut scroll = egui::ScrollArea::vertical().id_salt("gallery-grid");
         if self.scroll_to_grid_anchor {

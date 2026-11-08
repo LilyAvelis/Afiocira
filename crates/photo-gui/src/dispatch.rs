@@ -1,6 +1,27 @@
 use super::*;
 impl Workshop {
     pub(super) fn execute(&mut self, command: Command) -> Response {
+        self.navigation_dispatch_started();
+        self.cancel_navigator_continuation(&command);
+        if matches!(command, Command::NavigatorSnapshot)
+            || (self.active_pane == ActivePane::Yazi && navigator::needs_snapshot(&command))
+        {
+            return match self.queue_navigator_command(command) {
+                Ok(()) => self.execute_ready(Command::Status),
+                Err(error) => Response::error(ErrorCode::Busy, error, None),
+            };
+        }
+        self.execute_ready(command)
+    }
+    pub(super) fn execute_ready(&mut self, command: Command) -> Response {
+        let settings_details = matches!(
+            &command,
+            Command::ShowSettings
+                | Command::SelectSettings { .. }
+                | Command::ConfigureYazi {
+                    request: photo_core::settings::YaziRequest::Inspect
+                }
+        );
         if matches!(
             &command,
             Command::Open { .. }
@@ -15,6 +36,7 @@ impl Workshop {
                 | Command::Previous
                 | Command::Back
                 | Command::FocusPane { .. }
+                | Command::SetNavigatorVisible { .. }
         ) {
             self.interaction_revision = self.interaction_revision.wrapping_add(1);
         }
@@ -37,28 +59,60 @@ impl Workshop {
         };
         let mut navigator_location = None;
         let result: Result<(), String> = match command {
+            Command::SelectSettings { section, page } => {
+                self.select_settings(&section, page.as_deref())
+            }
+            Command::SetShortcut {
+                action,
+                context,
+                binding,
+                reset,
+                replace,
+            } => self.set_shortcut(action, context, binding, reset, replace),
+            Command::SetGalleryScale { scale } => self.set_gallery_scale(scale),
+            Command::SetGalleryAutoSize { enabled } => self.set_gallery_auto_size(enabled),
+            Command::ConfigureYazi { request } => self.configure_yazi(request),
+            Command::ShowSettings => self.open_settings(),
+            Command::CloseSettings => {
+                self.close_settings();
+                Ok(())
+            }
+            Command::SetYaziTextSize { size } => self.set_yazi_text_size(size),
             Command::EnterAlbum => self.enter_album(),
             Command::NavigatorSnapshot => self.navigator_snapshot().map(|snapshot| {
                 navigator_location = Some(snapshot);
             }),
-            Command::CaptureFrame { path } => {
-                if path.is_absolute() {
-                    self.ctx
-                        .send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(
-                            path,
-                        )));
+            Command::CaptureFrame { path, viewport } => {
+                if matches!(viewport, photo_core::api::AppViewport::Settings) {
+                    Err("Settings frame capture is unavailable in the current immediate-viewport renderer".into())
+                } else if path.is_absolute() {
+                    let viewport = match viewport {
+                        photo_core::api::AppViewport::Root => egui::ViewportId::ROOT,
+                        photo_core::api::AppViewport::Settings => settings::viewport_id(),
+                    };
+                    self.ctx.send_viewport_cmd_to(
+                        viewport,
+                        egui::ViewportCommand::Screenshot(egui::UserData::new(path)),
+                    );
                     Ok(())
                 } else {
                     Err("Screenshot path must be absolute".into())
                 }
             }
-            Command::ResizeViewport { width, height } => {
+            Command::ResizeViewport {
+                width,
+                height,
+                viewport,
+            } => {
                 if (680..=4096).contains(&width) && (460..=4096).contains(&height) {
-                    self.ctx
-                        .send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(
-                            width as f32,
-                            height as f32,
-                        )));
+                    let viewport = match viewport {
+                        photo_core::api::AppViewport::Root => egui::ViewportId::ROOT,
+                        photo_core::api::AppViewport::Settings => settings::viewport_id(),
+                    };
+                    self.ctx.send_viewport_cmd_to(
+                        viewport,
+                        egui::ViewportCommand::InnerSize(Vec2::new(width as f32, height as f32)),
+                    );
                     Ok(())
                 } else {
                     Err("Viewport must be within680–4096 ×460–4096".into())
@@ -329,6 +383,25 @@ impl Workshop {
         response.native_paste_shortcut = self.native_keys.is_some();
         response.operation = self.operation.clone();
         response.palette = Some(self.palette_snapshot());
+        response.settings = Some(self.settings.snapshot());
+        if let Some(settings) = &mut response.settings {
+            settings.page = Some(
+                if settings.section == "yazi" {
+                    self.yazi_settings.page
+                } else {
+                    "Shortcuts"
+                }
+                .into(),
+            );
+            let mut yazi = self.yazi_settings.view.clone();
+            if !settings_details {
+                yazi.bindings.clear();
+                yazi.inherited_bindings.clear();
+                yazi.flavors.clear();
+                settings.shortcuts.clear();
+            }
+            settings.yazi = Some(yazi);
+        }
         if include_commands {
             response.commands = Some(self.filtered_actions());
         }
@@ -347,6 +420,18 @@ impl Workshop {
             );
         }
         response.navigator = Some(NavigatorState {
+            runtime: navigator_location.as_ref().map(|snapshot| {
+                photo_core::api::NavigatorRuntimeState {
+                    marked_paths: snapshot.marked.clone(),
+                    ordered_paths: snapshot.ordered.clone(),
+                    preferences: snapshot.preferences.clone(),
+                    metadata: snapshot.metadata.clone(),
+                    tabs: snapshot.tabs,
+                }
+            }),
+            pending: self.navigator_pending_request().is_some()
+                || (self.selection_dirty && self.mark_sync_after.is_some()),
+            request_id: self.navigator_pending_request(),
             folder: navigator_location.as_ref().map(|s| s.folder.clone()),
             hovered: navigator_location.and_then(|s| s.hovered),
             visible: self.show_yazi,
@@ -359,14 +444,28 @@ impl Workshop {
         response
     }
     pub(super) fn poll_api(&mut self) {
-        let requests: Vec<_> = self
-            .api_requests
-            .as_ref()
-            .map(|receiver| receiver.try_iter().collect())
-            .unwrap_or_default();
-        for request in requests {
+        let started = Instant::now();
+        for _ in 0..4 {
+            let request = self
+                .api_requests
+                .as_ref()
+                .and_then(|receiver| receiver.try_recv().ok());
+            let Some(request) = request else { break };
+            if Instant::now() >= request.deadline {
+                let _ = request.reply.send(Response::error(
+                    ErrorCode::Busy,
+                    "API reply timed out",
+                    None,
+                ));
+                continue;
+            }
             let response = self.execute(request.command);
-            let _ = request.reply.send(response);
+            if !self.defer_navigator_reply(request.reply.clone(), request.deadline) {
+                let _ = request.reply.send(response);
+            }
+            if started.elapsed() >= Duration::from_millis(4) {
+                break;
+            }
         }
     }
 }

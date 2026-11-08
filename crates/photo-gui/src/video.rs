@@ -114,6 +114,11 @@ impl Api {
     }
 }
 
+type PendingCapture = (
+    std::sync::mpsc::Sender<Result<(), String>>,
+    Arc<CaptureFile>,
+);
+
 pub struct Video {
     api: Api,
     handle: Handle,
@@ -121,6 +126,8 @@ pub struct Video {
     resolver: Resolver,
     target: Option<(glow::Framebuffer, glow::Texture, [i32; 2])>,
     pub state: VideoState,
+    captures: std::collections::BTreeMap<u64, PendingCapture>,
+    next_capture: u64,
 }
 // The mutex serializes access. GL operations are called only by the render
 // callback and on_exit (same GL thread). No raw pointer escapes this module.
@@ -154,6 +161,8 @@ impl Video {
             resolver: cc.get_proc_address.clone().ok_or("Video requires OpenGL")?,
             target: None,
             state: VideoState::default(),
+            captures: Default::default(),
+            next_capture: 0,
         };
         for (key, value) in [
             ("vo", "libmpv"),
@@ -189,6 +198,9 @@ impl Video {
         Ok(Arc::new(Mutex::new(video)))
     }
     pub fn command(&mut self, args: &[&str]) -> Result<(), String> {
+        self.command_id(args, 0)
+    }
+    fn command_id(&mut self, args: &[&str], id: u64) -> Result<(), String> {
         let args: Vec<CString> = args
             .iter()
             .map(|s| CString::new(*s).map_err(|e| e.to_string()))
@@ -196,7 +208,32 @@ impl Video {
         let mut pointers: Vec<_> = args.iter().map(|s| s.as_ptr()).collect();
         pointers.push(std::ptr::null());
         self.api
-            .check(unsafe { (self.api.command)(self.handle, 0, pointers.as_ptr()) })
+            .check(unsafe { (self.api.command)(self.handle, id, pointers.as_ptr()) })
+    }
+    /// Queued on the active decoder before later navigation commands. Screenshot
+    /// uses the currently decoded video frame and never seeks or changes pause.
+    pub fn capture_frame(&mut self, source: &Path) -> Result<FrameCapture, String> {
+        if self.state.path.as_deref() != Some(source) || self.state.duration <= 0.0 {
+            return Err("Video frame is not ready".into());
+        }
+        let file = Arc::new(CaptureFile::new()?);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.next_capture = self.next_capture.wrapping_add(1).max(1);
+        let id = self.next_capture;
+        self.command_id(
+            &[
+                "screenshot-to-file",
+                &file.0.join("frame.png").to_string_lossy(),
+                "video",
+            ],
+            id,
+        )?;
+        self.captures.insert(id, (sender, file.clone()));
+        Ok(FrameCapture {
+            file,
+            receiver,
+            position: self.state.position,
+        })
     }
     pub fn sync_path(&mut self, path: Option<&Path>) {
         if self.state.path.as_deref() == path {
@@ -221,6 +258,12 @@ impl Video {
             let event = unsafe { &*(self.api.event)(self.handle, 0.0) };
             if event.id == 0 {
                 break;
+            }
+            if event.id == 5 && event.userdata != 0 {
+                if let Some((sender, _file)) = self.captures.remove(&event.userdata) {
+                    let _ = sender.send(self.api.check(event.error));
+                }
+                continue;
             }
             if event.error < 0 {
                 self.state.error = self.api.check(event.error).err();
@@ -408,4 +451,64 @@ pub fn canvas(ui: &mut egui::Ui, video: Arc<Mutex<Video>>) {
     });
     ui.ctx()
         .request_repaint_after(std::time::Duration::from_millis(16));
+}
+
+struct CaptureFile(PathBuf);
+impl CaptureFile {
+    fn new() -> Result<Self, String> {
+        static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        loop {
+            let path = std::env::temp_dir().join(format!(
+                "afio-frame-{}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos(),
+                SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ));
+            match std::fs::create_dir(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+    }
+}
+impl Drop for CaptureFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(self.0.join("frame.png"));
+        let _ = std::fs::remove_dir(&self.0);
+    }
+}
+pub struct FrameCapture {
+    file: Arc<CaptureFile>,
+    receiver: std::sync::mpsc::Receiver<Result<(), String>>,
+    pub position: f64,
+}
+impl FrameCapture {
+    pub fn wait(&self) -> Result<(), String> {
+        self.receiver
+            .recv_timeout(std::time::Duration::from_secs(15))
+            .map_err(|e| format!("Video frame capture did not complete: {e}"))?
+    }
+    pub fn path(&self) -> PathBuf {
+        self.file.0.join("frame.png")
+    }
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::*;
+    #[test]
+    fn capture_artifact_lives_until_both_worker_and_decoder_release_it() {
+        let file = Arc::new(CaptureFile::new().unwrap());
+        let folder = file.0.clone();
+        std::fs::write(folder.join("frame.png"), b"synthetic").unwrap();
+        let decoder = file.clone();
+        drop(file);
+        assert!(folder.join("frame.png").is_file());
+        drop(decoder);
+        assert!(!folder.exists());
+    }
 }

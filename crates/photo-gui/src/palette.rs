@@ -6,13 +6,20 @@ use photo_core::actions::{ActionId, ActionInfo};
 /// so a new command cannot silently inherit an unrelated navigation arrow.
 pub(super) fn icon(action: ActionId) -> Lucide {
     match action {
+        ActionId::RotateLeft => Lucide::RotateCcw,
+        ActionId::RotateRight => Lucide::RotateCw,
+        ActionId::FlipHorizontal => Lucide::FlipHorizontal2,
+        ActionId::FlipVertical => Lucide::FlipVertical2,
         ActionId::EnterAlbum => Lucide::FolderOpen,
+        ActionId::CopyVideoFrame => Lucide::Copy,
+        ActionId::SaveVideoFrame => Lucide::Image,
         ActionId::Copy => Lucide::Copy,
         ActionId::Duplicate => Lucide::CopyPlus,
         ActionId::Paste => Lucide::ClipboardPaste,
         ActionId::Rename => Lucide::Pencil,
         ActionId::Delete => Lucide::Trash2,
         ActionId::Search => Lucide::Search,
+        ActionId::Settings => Lucide::Settings,
         ActionId::ResizeImage => Lucide::Scaling,
         ActionId::ConvertImage => Lucide::Replace,
         ActionId::Open => Lucide::Image,
@@ -34,6 +41,30 @@ pub(super) struct State {
     pub focus_search: bool,
     pub scroll_selected: bool,
     pub enter_armed: bool,
+    shortcut: Option<InlineShortcut>,
+    shortcut_release: bool,
+    shortcut_selection: Option<(ActionId, String)>,
+}
+
+struct InlineShortcut {
+    action: ActionId,
+    context: String,
+    label: String,
+    binding: Option<String>,
+    error: Option<String>,
+    replaceable: bool,
+}
+
+fn take_assignment_key(input: &mut egui::InputState) -> bool {
+    let pressed = input.events.iter().any(|event| {
+        matches!(event,
+        egui::Event::Key { key: Key::Comma, pressed: true, repeat: false, modifiers, .. }
+        if modifiers.ctrl && modifiers.shift && !modifiers.alt && !modifiers.mac_cmd)
+    });
+    if pressed {
+        shortcuts::discard_recording_events(input);
+    }
+    pressed
 }
 
 fn take_enter(i: &mut egui::InputState, opening: bool, armed: &mut bool) -> bool {
@@ -55,6 +86,150 @@ fn take_enter(i: &mut egui::InputState, opening: bool, armed: &mut bool) -> bool
 }
 
 impl Workshop {
+    fn begin_palette_shortcut(&mut self) {
+        self.palette.shortcut_release = true;
+        let Some(action) = self.filtered_actions().get(self.palette.selected).cloned() else {
+            return;
+        };
+        let context = self.shortcut_context().to_owned();
+        let editable = shortcuts::catalogue(&self.settings.shortcuts)
+            .iter()
+            .any(|entry| entry.action == action.id && entry.context == context && entry.rebindable);
+        if !editable {
+            self.message = "Эта клавиша закреплена в Afio".into();
+            return;
+        }
+        self.settings.shortcut_candidate = None;
+        self.palette.shortcut = Some(InlineShortcut {
+            action: action.id,
+            context,
+            label: action.label,
+            binding: None,
+            error: None,
+            replaceable: false,
+        });
+        self.palette.shortcut_release = true;
+    }
+
+    /// Called before global shortcuts, including the Ctrl+, Settings shortcut.
+    pub(super) fn palette_shortcut_input(&mut self, ctx: &egui::Context) -> bool {
+        if !self.palette.open {
+            if self.palette.shortcut.take().is_some() {
+                self.settings.shortcut_candidate = None;
+                self.settings.error = None;
+                self.palette.shortcut_release = true;
+            }
+            self.palette.shortcut_selection = None;
+        }
+        if self.palette.shortcut_release {
+            let released = ctx.input_mut(|input| {
+                let released = input.keys_down.is_empty();
+                shortcuts::discard_recording_events(input);
+                released
+            });
+            self.palette.shortcut_release = !released;
+            return true;
+        }
+        if let Some(capture) = self.palette.shortcut.as_ref() {
+            let action = capture.action;
+            let context = capture.context.clone();
+            let recording = capture.binding.is_none();
+            let captured = ctx.input_mut(shortcuts::take_recorded_chord);
+            match captured {
+                Some(None) => {
+                    self.palette.shortcut = None;
+                    self.settings.shortcut_candidate = None;
+                    self.settings.error = None;
+                    self.palette.shortcut_release = true;
+                }
+                Some(Some(binding)) if recording => {
+                    self.apply_palette_shortcut(action, context, binding, false);
+                }
+                _ => {}
+            }
+            return true;
+        }
+        if self.palette.open && ctx.input_mut(take_assignment_key) {
+            self.begin_palette_shortcut();
+            return true;
+        }
+        false
+    }
+
+    fn apply_palette_shortcut(
+        &mut self,
+        action: ActionId,
+        context: String,
+        binding: String,
+        replace: bool,
+    ) {
+        match self.set_shortcut(action, context, Some(binding.clone()), false, replace) {
+            Ok(()) => {
+                self.palette.shortcut = None;
+                self.palette.shortcut_release = true;
+                self.palette.enter_armed = false;
+                // A query may contain the previous binding. Keep its selected
+                // action visible until the user changes that query.
+                self.palette.shortcut_selection = Some((action, self.palette.query.clone()));
+                if let Some(index) = self
+                    .filtered_actions()
+                    .iter()
+                    .position(|entry| entry.id == action)
+                {
+                    self.palette.selected = index;
+                }
+            }
+            Err(error) => {
+                if let Some(capture) = &mut self.palette.shortcut {
+                    capture.binding = Some(binding);
+                    capture.error = Some(error);
+                    capture.replaceable = self.settings.shortcut_candidate.is_some();
+                }
+            }
+        }
+    }
+
+    fn palette_shortcut_editor(&mut self, ui: &mut egui::Ui) {
+        let Some(capture) = self.palette.shortcut.as_ref() else {
+            return;
+        };
+        let action = capture.action;
+        let context = capture.context.clone();
+        let binding = capture.binding.clone();
+        let replaceable = capture.replaceable;
+        ui.strong(format!("Клавиша · {}", capture.label));
+        ui.weak(match capture.context.as_str() {
+            "space" => "Просмотр файла",
+            "albums" => "Альбомы",
+            _ => "Галерея",
+        });
+        if let Some(error) = &capture.error {
+            ui.colored_label(Color32::LIGHT_RED, error);
+        } else {
+            ui.label("Нажмите сочетание клавиш. Оно сохранится сразу.");
+        }
+        ui.horizontal(|ui| {
+            if replaceable && ui.button("Заменить назначение").clicked() {
+                self.apply_palette_shortcut(action, context, binding.clone().unwrap(), true);
+            }
+            if binding.is_some()
+                && ui.button("Другая клавиша").clicked()
+                && let Some(capture) = &mut self.palette.shortcut
+            {
+                capture.binding = None;
+                capture.error = None;
+                capture.replaceable = false;
+                self.settings.shortcut_candidate = None;
+            }
+            if ui.button("Отмена · Esc").clicked() {
+                self.palette.shortcut = None;
+                self.settings.shortcut_candidate = None;
+                self.settings.error = None;
+                self.palette.shortcut_release = true;
+            }
+        });
+        ui.separator();
+    }
     pub(super) fn filtered_actions(&self) -> Vec<ActionInfo> {
         let words: Vec<_> = self
             .palette
@@ -69,6 +244,11 @@ impl Workshop {
                 let haystack =
                     format!("{} {} {:?} {}", a.label, a.group, a.id, a.shortcut).to_lowercase();
                 words.iter().all(|word| haystack.contains(word))
+                    || self
+                        .palette
+                        .shortcut_selection
+                        .as_ref()
+                        .is_some_and(|(id, query)| *id == a.id && *query == self.palette.query)
             })
             .collect()
     }
@@ -139,20 +319,23 @@ impl Workshop {
         let mut picked = None;
         let opening = self.palette.focus_search;
         let mut refocus_search = false;
-        let enter = ctx.input_mut(|i| {
-            let enter = take_enter(i, opening, &mut self.palette.enter_armed);
-            refocus_search = i.consume_key(egui::Modifiers::NONE, Key::Tab)
-                | i.consume_key(egui::Modifiers::SHIFT, Key::Tab);
-            if i.consume_key(egui::Modifiers::NONE, Key::ArrowDown) && !actions.is_empty() {
-                self.palette.selected = (self.palette.selected + 1) % actions.len();
-                self.palette.scroll_selected = true;
-            }
-            if i.consume_key(egui::Modifiers::NONE, Key::ArrowUp) && !actions.is_empty() {
-                self.palette.selected = (self.palette.selected + actions.len() - 1) % actions.len();
-                self.palette.scroll_selected = true;
-            }
-            enter
-        });
+        let enter = !self.palette.shortcut_release
+            && self.palette.shortcut.is_none()
+            && ctx.input_mut(|i| {
+                let enter = take_enter(i, opening, &mut self.palette.enter_armed);
+                refocus_search = i.consume_key(egui::Modifiers::NONE, Key::Tab)
+                    | i.consume_key(egui::Modifiers::SHIFT, Key::Tab);
+                if i.consume_key(egui::Modifiers::NONE, Key::ArrowDown) && !actions.is_empty() {
+                    self.palette.selected = (self.palette.selected + 1) % actions.len();
+                    self.palette.scroll_selected = true;
+                }
+                if i.consume_key(egui::Modifiers::NONE, Key::ArrowUp) && !actions.is_empty() {
+                    self.palette.selected =
+                        (self.palette.selected + actions.len() - 1) % actions.len();
+                    self.palette.scroll_selected = true;
+                }
+                enter
+            });
         let width = (ctx.content_rect().width() - 28.0).clamp(240.0, 420.0);
         let area = egui::Modal::default_area(egui::Id::new("action-palette"))
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-14.0, -58.0));
@@ -168,108 +351,133 @@ impl Workshop {
             )
             .show(ctx, |ui| {
                 ui.set_width(width);
-                ui.label(
-                    egui::RichText::new(
-                        if self
-                            .gallery
-                            .as_ref()
-                            .is_some_and(|g| g.view() == View::Photo)
-                        {
-                            "Действия с файлом"
-                        } else {
-                            "Действия с выделением и папкой"
-                        },
-                    )
-                    .strong()
-                    .size(13.0),
-                );
-                ui.add_space(2.0);
-                egui::ScrollArea::vertical()
-                    .max_height((ctx.content_rect().height() - 180.0).clamp(80.0, 320.0))
-                    .show(ui, |ui| {
-                        let mut group = String::new();
-                        for (index, action) in actions.iter().enumerate() {
-                            if group != action.group {
-                                group = action.group.clone();
-                                ui.add_space(3.0);
-                                ui.label(
-                                    egui::RichText::new(&group)
-                                        .size(11.0)
-                                        .color(Color32::from_gray(185)),
-                                );
-                            }
-                            let (rect, response) = ui.allocate_exact_size(
-                                egui::vec2(ui.available_width(), 38.0),
-                                egui::Sense::click(),
-                            );
-                            if index == self.palette.selected || response.hovered() {
-                                ui.painter().rect_filled(
-                                    rect,
-                                    7.0,
-                                    Color32::from_rgb(100, 100, 108),
-                                );
-                            }
-                            if index == self.palette.selected && self.palette.scroll_selected {
-                                self.palette.scroll_selected = false;
-                                response.scroll_to_me(Some(egui::Align::Center));
-                            }
-                            ui.scope_builder(
-                                egui::UiBuilder::new()
-                                    .max_rect(rect.shrink2(egui::vec2(9.0, 3.0)))
-                                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                                |ui| {
-                                    let icon = icon(action.id);
-                                    if action.id == ActionId::Delete {
-                                        ui.visuals_mut().override_text_color =
-                                            Some(Color32::LIGHT_RED);
-                                    }
-                                    ui.add(icon.size(16.0).image());
-                                    ui.label(egui::RichText::new(&action.label).size(14.0).color(
-                                        if action.id == ActionId::Delete {
-                                            Color32::LIGHT_RED
-                                        } else {
-                                            ui.visuals().text_color()
-                                        },
-                                    ));
-                                    ui.with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            if !action.shortcut.is_empty() {
-                                                crate::ui_style::keycap(ui, &action.shortcut);
-                                            }
-                                        },
-                                    );
-                                },
-                            );
-                            if response.clicked() {
-                                picked = Some(action.id);
-                            }
-                        }
-                        if actions.is_empty() {
-                            ui.add_space(12.0);
-                            ui.label("Ничего не найдено");
-                            ui.add_space(12.0);
-                        }
-                    });
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.add(Lucide::Search.size(16.0).image());
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut self.palette.query)
-                            .hint_text("Поиск действий…")
-                            .frame(egui::Frame::NONE)
-                            .desired_width(width - 80.0),
+                self.palette_shortcut_editor(ui);
+                if self.palette.shortcut.is_none() {
+                    ui.label(
+                        egui::RichText::new(
+                            if self
+                                .gallery
+                                .as_ref()
+                                .is_some_and(|g| g.view() == View::Photo)
+                            {
+                                "Действия с файлом"
+                            } else {
+                                "Действия с выделением и папкой"
+                            },
+                        )
+                        .strong()
+                        .size(13.0),
                     );
-                    if self.palette.focus_search || refocus_search {
-                        response.request_focus();
-                        self.palette.focus_search = false;
+                    ui.add_space(2.0);
+                    egui::ScrollArea::vertical()
+                        .max_height((ctx.content_rect().height() - 180.0).clamp(80.0, 320.0))
+                        .show(ui, |ui| {
+                            let mut group = String::new();
+                            for (index, action) in actions.iter().enumerate() {
+                                if group != action.group {
+                                    group = action.group.clone();
+                                    ui.add_space(3.0);
+                                    ui.label(
+                                        egui::RichText::new(&group)
+                                            .size(11.0)
+                                            .color(Color32::from_gray(185)),
+                                    );
+                                }
+                                let (rect, response) = ui.allocate_exact_size(
+                                    egui::vec2(ui.available_width(), 38.0),
+                                    egui::Sense::click(),
+                                );
+                                if index == self.palette.selected || response.hovered() {
+                                    ui.painter().rect_filled(
+                                        rect,
+                                        7.0,
+                                        Color32::from_rgb(100, 100, 108),
+                                    );
+                                }
+                                if index == self.palette.selected && self.palette.scroll_selected {
+                                    self.palette.scroll_selected = false;
+                                    response.scroll_to_me(Some(egui::Align::Center));
+                                }
+                                ui.scope_builder(
+                                    egui::UiBuilder::new()
+                                        .max_rect(rect.shrink2(egui::vec2(9.0, 3.0)))
+                                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                                    |ui| {
+                                        let icon = icon(action.id);
+                                        if action.id == ActionId::Delete {
+                                            ui.visuals_mut().override_text_color =
+                                                Some(Color32::LIGHT_RED);
+                                        }
+                                        ui.add(icon.size(16.0).image());
+                                        ui.label(
+                                            egui::RichText::new(&action.label).size(14.0).color(
+                                                if action.id == ActionId::Delete {
+                                                    Color32::LIGHT_RED
+                                                } else {
+                                                    ui.visuals().text_color()
+                                                },
+                                            ),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                if !action.shortcut.is_empty() {
+                                                    crate::ui_style::keycap(ui, &action.shortcut);
+                                                }
+                                            },
+                                        );
+                                    },
+                                );
+                                if response.clicked() {
+                                    picked = Some(action.id);
+                                }
+                            }
+                            if actions.is_empty() {
+                                ui.add_space(12.0);
+                                ui.label("Ничего не найдено");
+                                ui.add_space(12.0);
+                            }
+                            crate::scroll_navigation::apply(ui);
+                        });
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.add(Lucide::Search.size(16.0).image());
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut self.palette.query)
+                                .hint_text("Поиск действий…")
+                                .frame(egui::Frame::NONE)
+                                .desired_width(width - 80.0),
+                        );
+                        if self.palette.focus_search || refocus_search {
+                            response.request_focus();
+                            self.palette.focus_search = false;
+                        }
+                        if response.changed() {
+                            self.palette.shortcut_selection = None;
+                            self.palette.selected = 0;
+                            self.palette.scroll_selected = true;
+                        }
+                        crate::ui_style::keycap(ui, "Esc");
+                    });
+                    let editable = actions.get(self.palette.selected).is_some_and(|action| {
+                        shortcuts::catalogue(&self.settings.shortcuts)
+                            .iter()
+                            .any(|entry| {
+                                entry.action == action.id
+                                    && entry.context == self.shortcut_context()
+                                    && entry.rebindable
+                            })
+                    });
+                    if ui
+                        .add_enabled(
+                            editable,
+                            egui::Button::new("Назначить клавишу · Ctrl Shift ,").small(),
+                        )
+                        .clicked()
+                    {
+                        self.begin_palette_shortcut();
                     }
-                    if response.changed() {
-                        self.palette.selected = 0;
-                        self.palette.scroll_selected = true;
-                    }
-                    crate::ui_style::keycap(ui, "Esc");
-                });
+                }
             });
         // TextEdit processes this frame's text events during show(). Resolve
         // Enter against that current query, never the list rendered beforehand.
@@ -284,7 +492,13 @@ impl Workshop {
                 self.message = error.message;
             }
         } else if result.should_close() {
-            self.close_palette();
+            if self.palette.shortcut.take().is_some() {
+                self.settings.shortcut_candidate = None;
+                self.settings.error = None;
+                self.palette.shortcut_release = true;
+            } else {
+                self.close_palette();
+            }
         }
     }
 }
@@ -292,6 +506,35 @@ impl Workshop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_assignment_consumes_native_ctrl_shift_comma_before_settings() {
+        let ctx = egui::Context::default();
+        let modifiers = egui::Modifiers::CTRL | egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                events: vec![
+                    egui::Event::Key {
+                        key: Key::Comma,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    },
+                    egui::Event::Text(",".into()),
+                ],
+                ..Default::default()
+            },
+            |ui| {
+                ui.ctx().input_mut(|input| {
+                    assert!(take_assignment_key(input));
+                    assert!(!input.consume_key(egui::Modifiers::CTRL, Key::Comma));
+                    assert!(input.events.is_empty());
+                });
+            },
+        );
+        output.textures_delta.clear();
+    }
 
     #[test]
     fn opening_enter_and_repeats_require_release_then_fresh_press() {

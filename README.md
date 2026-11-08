@@ -1,4 +1,4 @@
-# Afiocira 2.0
+# Afiocira 2.5
 
 Created by **Lilia Avelis and GPT-6.1 Sol**.
 
@@ -6,11 +6,19 @@ A Windows photo and video gallery with a real embedded Yazi file manager, fast E
 
 ## Download and run
 
-Download the **2.0.0 Windows x64 installer** or portable ZIP from [Releases](https://github.com/LilyAvelis/Afiocira/releases/tag/v2.0.0). Windows11 x64 with an OpenGL-capable driver is the tested platform. The installer is unsigned. It installs for the current user and adds Open With entries without changing your defaults.
+Download the **2.5.0 Windows x64 installer** or portable ZIP from [v2.5.0](https://github.com/LilyAvelis/Afiocira/releases/tag/v2.5.0). Windows11 x64 with an OpenGL-capable driver is the tested platform. The installer is unsigned. It installs for the current user and adds Open With entries without changing your defaults.
 
 The package carries Yazi26.5.6, the Everything ES helper, a Nerd Font and notices. The installer downloads the pinned libmpv and FFmpeg distributions directly from upstream for video support (Internet required). Portable users run **Enable-Video.cmd** once before starting Afio to enable video playback and thumbnails. Everything itself must be installed and running to enable indexed search; the gallery works without it. For the portable ZIP, extract the whole folder, install the included Microsoft VC++ runtime if needed, and launch **Afiocira.exe**. Keep its adjacent runtime files/folders together.
 
-## What's in 2.0
+## What's in 2.5
+
+- Native Settings (Ctrl+,), Afio shortcut customization and Action Panel shortcut assignment (Ctrl+Shift+,).
+- Yazi themes/flavors, icons, General settings, Quicklinks and inline keybinding recording; Yazi-only Dark/Light and Shift+Tab file details.
+- Same-file rotation and mirroring with 230 ms animation; copy/save the current video frame.
+- Dynamic albums, Ctrl+wheel scaling and automatic card sizing that remembers the manual size.
+- Shared UI Foundation, middle-button hold scrolling, acknowledged private Yazi handoffs, scoped selections, cancellation, settings merging, bounded IPC and cache repairs.
+
+The mixed-media workspace also includes:
 
 - Mixed photo/video gallery and Space viewer: libmpv playback, audio, pause, seeking and volume; FFmpeg video thumbnails.
 - Raycast-inspired Actions menus for Gallery and Space, with vector icons and keyboard-operated forms.
@@ -27,6 +35,10 @@ The package carries Yazi26.5.6, the Everything ES helper, a Nerd Font and notice
 
 | Context | Keys | Result |
 | --- | --- | --- |
+| Everywhere | Ctrl+, | Open/focus Settings |
+| Actions | Ctrl+Shift+, | Assign selected command shortcut |
+| Gallery | Ctrl+wheel | Set manual card size |
+| Yazi | Shift+Tab | File details |
 | Everywhere | Ctrl+K | Contextual Actions |
 | Everywhere | Ctrl+Shift+K | Everything search |
 | Gallery / Yazi | Tab | Switch pane and synchronize context |
@@ -44,7 +56,7 @@ In an album overview, Tab highlights that **album folder** in its parent in Yazi
 
 ## Boundaries
 
-Image previews support PNG/JPEG/WebP/GIF/BMP/TIFF with EXIF orientation. HEIC/HEIF/AVIF are recognized in listings but not decoded yet. No ICC-managed display, animated-image playback, full-resolution1:1 mode, batch F2, shortcut customization, general undo or drag-out is claimed.
+Image previews support PNG/JPEG/WebP/GIF/BMP/TIFF with EXIF orientation. HEIC/HEIF/AVIF are recognized in listings but not decoded yet. No ICC-managed display, animated-image playback, full-resolution1:1 mode, batch F2, general undo or drag-out is claimed.
 
 Nested browsing counts the immediate level only; pages are bounded and deeper directories require exploration. Image conversion currently accepts static8-bit PNG/JPEG/WebP; unsupported animation/alpha/precision cases are rejected. Converting replaces the source after verification; use Ctrl+D first to keep a separate original. Metadata removal requires explicit permission. Resize creates a new unique copy. Recovery files may remain after an interrupted conversion.
 
@@ -62,15 +74,21 @@ cargo build --locked --release --workspace
 ./target/release/photo-cli.exe ctl status
 ```
 
-Release packaging: [docs/release-2.0.md](docs/release-2.0.md). Runtime dependencies are pinned and checksummed; see their notices in the package. Afio's code is MIT licensed; external components retain their own licenses.
+Release packaging: [docs/release-2.5.md](docs/release-2.5.md). Runtime dependencies are pinned and checksummed; see their notices in the package. Afio's code is MIT licensed; external components retain their own licenses.
 
 For development, `scripts/update-working.ps1` updates the permanent Afiocira desktop shortcut via a launcher and immutable working-version directories. It does not overwrite an already open GUI.
+
+## Release
+
+The source targets **2.5.0**. See [release notes and validation](docs/release-2.5.md)
+and [Settings](docs/settings.md) for complete scope and application guards.
+The historical [2.0 release record](docs/release-2.0.md) remains available.
 
 ## Technical notes
 
 [Architecture](docs/architecture.md) · [Yazi](docs/yazi-navigation.md) · [Video](docs/video.md) · [Actions](docs/actions.md) · [Clipboard/rename/drop](docs/import-and-rename.md) · [Delete](docs/delete.md) · [Latency](docs/delete-performance.md) · [Everything](docs/everything.md) · [Albums and image actions](docs/nested-and-image-actions.md) · [Terminal colors](docs/terminal-colors.md).
 
-All GUI, keyboard, CLI and native API commands share one dispatcher. The Windows release was checked with129 unit/native tests,3 doctests, strict Clippy and isolated native API scenarios. Those checks do not certify every codec, filesystem or machine.
+All GUI, keyboard, CLI and native API commands share one dispatcher. Release validation includes unit/native tests, doctests, strict Clippy and isolated native API scenarios; current evidence is recorded in [the 2.5 release record](docs/release-2.5.md). Those checks do not certify every codec, filesystem or machine.
 
 ## Project
 

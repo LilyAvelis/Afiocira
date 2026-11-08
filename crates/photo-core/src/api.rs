@@ -12,18 +12,57 @@ pub enum Pane {
     Gallery,
     Navigator,
 }
+/// Explicit surface for native API capture/geometry checks.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppViewport {
+    #[default]
+    Root,
+    Settings,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum Command {
     Status,
+    ShowSettings,
+    SelectSettings {
+        section: String,
+        page: Option<String>,
+    },
+    SetShortcut {
+        action: crate::actions::ActionId,
+        context: String,
+        binding: Option<String>,
+        #[serde(default)]
+        reset: bool,
+        #[serde(default)]
+        replace: bool,
+    },
+    SetGalleryScale {
+        scale: Option<f32>,
+    },
+    SetGalleryAutoSize {
+        enabled: bool,
+    },
+    ConfigureYazi {
+        request: crate::settings::YaziRequest,
+    },
+    CloseSettings,
+    SetYaziTextSize {
+        size: f32,
+    },
     EnterAlbum,
     NavigatorSnapshot,
     CaptureFrame {
         path: PathBuf,
+        #[serde(default)]
+        viewport: AppViewport,
     },
     ResizeViewport {
         width: u32,
         height: u32,
+        #[serde(default)]
+        viewport: AppViewport,
     },
     SubmitImage {
         options: ImageOptions,
@@ -130,6 +169,8 @@ pub enum Command {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
+    #[serde(default)]
+    pub collection_id: u64,
     pub folder: PathBuf,
     pub count: usize,
     pub view: View,
@@ -145,6 +186,7 @@ pub struct Snapshot {
 impl From<&Gallery> for Snapshot {
     fn from(gallery: &Gallery) -> Self {
         Self {
+            collection_id: gallery.collection_id(),
             folder: gallery.folder().to_path_buf(),
             count: gallery.photos().len(),
             view: gallery.view(),
@@ -184,6 +226,8 @@ pub struct OperationTiming {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RenderState {
+    #[serde(default)]
+    pub transform_animating: bool,
     pub preview_ready: bool,
     pub thumbnail_ready: bool,
     pub next_preview_ready: bool,
@@ -192,6 +236,8 @@ pub struct RenderState {
     pub preview_textures: Vec<(PathBuf, u64)>,
     #[serde(default)]
     pub thumbnail_textures: Vec<(PathBuf, u64)>,
+    #[serde(default)]
+    pub fallback_preview_textures: Vec<(PathBuf, u64)>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationState {
@@ -303,6 +349,8 @@ pub struct SearchState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
     #[serde(default)]
+    pub settings: Option<SettingsState>,
+    #[serde(default)]
     pub search: Option<SearchState>,
     #[serde(default)]
     pub nested: Option<NestedState>,
@@ -331,8 +379,26 @@ pub struct Response {
     pub render: Option<RenderState>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingsState {
+    pub open: bool,
+    pub section: String,
+    #[serde(default)]
+    pub page: Option<String>,
+    pub yazi_text_size: f32,
+    pub error: Option<String>,
+    #[serde(default)]
+    pub yazi: Option<crate::settings::YaziSettingsSnapshot>,
+    #[serde(default)]
+    pub shortcuts: Vec<crate::settings::ShortcutInfo>,
+    #[serde(default)]
+    pub gallery_scale: Option<f32>,
+    #[serde(default)]
+    pub gallery_auto_size: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
+    Busy,
     InvalidCommand,
     InvalidPath,
     InvalidSelection,
@@ -346,6 +412,13 @@ pub struct ApiError {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NavigatorState {
+    /// Fresh native details only for the explicit navigator_snapshot request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<NavigatorRuntimeState>,
+    #[serde(default)]
+    pub pending: bool,
+    #[serde(default)]
+    pub request_id: Option<u64>,
     #[serde(default)]
     pub folder: Option<PathBuf>,
     #[serde(default)]
@@ -353,9 +426,18 @@ pub struct NavigatorState {
     pub visible: bool,
     pub focus: Pane,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NavigatorRuntimeState {
+    pub marked_paths: Vec<PathBuf>,
+    pub ordered_paths: Vec<PathBuf>,
+    pub preferences: serde_json::Value,
+    pub metadata: serde_json::Value,
+    pub tabs: usize,
+}
 impl Response {
     pub fn ok(gallery: Option<&Gallery>) -> Self {
         Self {
+            settings: None,
             search: None,
             nested: None,
             image_dialog: None,
@@ -376,6 +458,7 @@ impl Response {
     }
     pub fn error(code: ErrorCode, message: impl Into<String>, gallery: Option<&Gallery>) -> Self {
         Self {
+            settings: None,
             search: None,
             nested: None,
             image_dialog: None,

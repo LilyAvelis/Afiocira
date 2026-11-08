@@ -4,6 +4,24 @@ use photo_core::actions::ActionId;
 use photo_core::api::{FileResult, OperationState};
 use std::sync::mpsc::SyncSender;
 
+fn transform_events() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, Instant>> {
+    static EVENTS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<PathBuf, Instant>>,
+    > = std::sync::OnceLock::new();
+    EVENTS.get_or_init(Default::default)
+}
+pub(super) fn own_transform_membership(path: &Path) -> bool {
+    let mut events = transform_events().lock().unwrap();
+    events.retain(|_, deadline| *deadline > Instant::now());
+    events.contains_key(path)
+}
+fn track_transform(source: &Path, duration: Duration) {
+    transform_events()
+        .lock()
+        .unwrap()
+        .insert(source.to_path_buf(), Instant::now() + duration);
+}
+
 pub(super) struct Worker {
     tasks: SyncSender<Task>,
     results: Receiver<Completed>,
@@ -11,13 +29,27 @@ pub(super) struct Worker {
 struct Completed {
     state: OperationState,
     submitted: Instant,
+    session_id: String,
+    saved_preview: Option<crate::resize_image::SavedPreview>,
 }
 struct Task {
     submitted: Instant,
     id: u64,
     kind: TaskKind,
+    session_id: String,
 }
 pub(super) enum TaskKind {
+    VideoFrame {
+        source: PathBuf,
+        version: photo_core::rename::SourceVersion,
+        action: ActionId,
+        capture: crate::video::FrameCapture,
+    },
+    Transform {
+        source: PathBuf,
+        version: photo_core::rename::SourceVersion,
+        action: ActionId,
+    },
     Image {
         source: PathBuf,
         version: photo_core::rename::SourceVersion,
@@ -43,6 +75,8 @@ pub(super) enum TaskKind {
 impl TaskKind {
     fn action(&self) -> ActionId {
         match self {
+            Self::VideoFrame { action, .. } => *action,
+            Self::Transform { action, .. } => *action,
             Self::Image { convert, .. } => {
                 if *convert {
                     ActionId::ConvertImage
@@ -59,6 +93,8 @@ impl TaskKind {
     }
     fn paths(&self) -> Vec<PathBuf> {
         match self {
+            Self::VideoFrame { source, .. } => vec![source.clone()],
+            Self::Transform { source, .. } => vec![source.clone()],
             Self::Image { source, .. } => vec![source.clone()],
             Self::Delete(targets) => targets.iter().map(|t| t.path.clone()).collect(),
             Self::Duplicate(paths) | Self::Copy(paths) | Self::Import { paths, .. } => {
@@ -71,6 +107,7 @@ impl TaskKind {
 }
 pub(super) struct Origin {
     folder: PathBuf,
+    collection_id: u64,
     video: Option<photo_core::api::VideoState>,
     marks: std::collections::BTreeSet<PathBuf>,
     view: View,
@@ -105,6 +142,7 @@ impl Worker {
         std::thread::spawn(move || {
             while let Ok(task) = receiver.recv() {
                 let work_started = Instant::now();
+                let mut saved_preview = None;
                 let mut state = OperationState {
                     id: task.id,
                     action: task.kind.action(),
@@ -117,6 +155,67 @@ impl Worker {
                     }),
                 };
                 match task.kind {
+                    TaskKind::VideoFrame {
+                        source,
+                        version,
+                        action,
+                        capture,
+                    } => {
+                        let result = (|| -> Result<Option<PathBuf>, String> {
+                            capture.wait()?;
+                            if photo_core::rename::capture(&source).map_err(|e| e.to_string())?
+                                != version
+                            {
+                                return Err("Source video changed during capture".into());
+                            }
+                            if action == ActionId::CopyVideoFrame {
+                                crate::clipboard::copy_pixels(&capture.path())?;
+                                Ok(None)
+                            } else {
+                                let bytes =
+                                    std::fs::read(capture.path()).map_err(|e| e.to_string())?;
+                                let stem = source.file_stem().unwrap_or_default().to_string_lossy();
+                                let name = format!("{stem} - frame {:.3}s.png", capture.position);
+                                photo_core::import::write_bytes(
+                                    source.parent().ok_or("No source folder")?,
+                                    &name,
+                                    &bytes,
+                                )
+                                .map(Some)
+                                .map_err(|e| e.to_string())
+                            }
+                        })();
+                        let (destination, error) = match result {
+                            Ok(path) => (path, None),
+                            Err(e) => (None, Some(e)),
+                        };
+                        state.files.push(FileResult {
+                            source,
+                            destination,
+                            error,
+                        });
+                    }
+                    TaskKind::Transform {
+                        source,
+                        version,
+                        action,
+                    } => {
+                        let result =
+                            crate::resize_image::transform_in_place(&source, &version, action);
+                        let (destination, error) = match result {
+                            Ok(output) => {
+                                state.warnings.push(output.metadata_notice.into());
+                                saved_preview = output.saved_preview;
+                                (Some(output.path), None)
+                            }
+                            Err(error) => (None, Some(error)),
+                        };
+                        state.files.push(FileResult {
+                            source,
+                            destination,
+                            error,
+                        });
+                    }
                     TaskKind::Image {
                         source,
                         version,
@@ -230,6 +329,8 @@ impl Worker {
                     .send(Completed {
                         state,
                         submitted: task.submitted,
+                        session_id: task.session_id,
+                        saved_preview,
                     })
                     .is_err()
                 {
@@ -288,12 +389,16 @@ impl Workshop {
     pub(super) fn start_task(&mut self, kind: TaskKind) -> Result<(), String> {
         let submitted = Instant::now();
         self.visual_probe = None;
-        if self.operation.as_ref().is_some_and(|j| j.running) {
+        self.retire_transform_animation();
+        if self.operation.as_ref().is_some_and(|j| j.running)
+            || (matches!(&kind, TaskKind::Transform { .. }) && self.transform_animation.is_some())
+        {
             return Err("A file action is already running".into());
         }
         let gallery = self.gallery.as_ref().ok_or("No open gallery")?;
         let origin = Origin {
             folder: gallery.folder().to_path_buf(),
+            collection_id: gallery.collection_id(),
             video: if matches!(&kind, TaskKind::Rename { .. } | TaskKind::Delete(_))
                 && gallery.view() == View::Photo
             {
@@ -315,6 +420,17 @@ impl Workshop {
         };
         let action = kind.action();
         let paths = kind.paths();
+        if matches!(
+            action,
+            ActionId::RotateLeft
+                | ActionId::RotateRight
+                | ActionId::FlipHorizontal
+                | ActionId::FlipVertical
+        ) {
+            for path in &paths {
+                track_transform(path, Duration::from_secs(60));
+            }
+        }
         self.next_operation += 1;
         let id = self.next_operation;
         // Stop an affected video before the worker can ask Shell to recycle it.
@@ -333,8 +449,10 @@ impl Workshop {
                 id,
                 kind,
                 submitted,
+                session_id: self.session_id.clone(),
             })
             .map_err(|e| e.to_string())?;
+        self.start_transform_animation(id, action, &paths, submitted);
         self.operation_origin = Some(origin);
         self.operation = Some(OperationState {
             id,
@@ -354,9 +472,24 @@ impl Workshop {
         self.message = "Выполняется…".into();
         Ok(())
     }
-    pub(super) fn poll_operations(&mut self) {
+    pub(super) fn poll_operations(&mut self, ctx: &egui::Context) {
         while let Ok(completed) = self.worker.results.try_recv() {
+            if completed.session_id != self.session_id
+                || self
+                    .operation
+                    .as_ref()
+                    .is_none_or(|operation| operation.id != completed.state.id)
+            {
+                continue;
+            }
             let mut result = completed.state;
+            if let Some(animation) = &mut self.transform_animation {
+                animation.complete(
+                    result.id,
+                    result.files.iter().all(|file| file.error.is_none()),
+                    Instant::now(),
+                );
+            }
             if let Some(timing) = &mut result.timing {
                 timing.ui_received_ms = completed.submitted.elapsed().as_secs_f64() * 1000.0;
             }
@@ -365,12 +498,12 @@ impl Workshop {
                 .iter()
                 .filter_map(|f| f.destination.clone())
                 .collect();
-            if result.action != ActionId::Copy
+            if !matches!(result.action, ActionId::Copy | ActionId::CopyVideoFrame)
                 && let Some(origin) = self.operation_origin.take()
-                && self
-                    .gallery
-                    .as_ref()
-                    .is_some_and(|g| same_folder(g.folder(), &origin.folder))
+                && self.gallery.as_ref().is_some_and(|g| {
+                    g.collection_id() == origin.collection_id
+                        && same_folder(g.folder(), &origin.folder)
+                })
             {
                 let apply = self.interaction_revision == origin.revision;
                 if apply
@@ -397,10 +530,34 @@ impl Workshop {
                         }
                     }
                 }
-                let _ = self.refresh_after_delete();
+                let transformed = matches!(
+                    result.action,
+                    ActionId::RotateLeft
+                        | ActionId::RotateRight
+                        | ActionId::FlipHorizontal
+                        | ActionId::FlipVertical
+                );
+                if !transformed {
+                    let _ = self.refresh_after_delete();
+                } else {
+                    for file in &result.files {
+                        track_transform(&file.source, Duration::from_secs(1));
+                    }
+                    // Cancel stale in-flight decodes, retaining every unaffected texture.
+                    self.generation += 1;
+                    self.preview_tasks.set_generation(self.generation);
+                    self.thumbnail_tasks.set_generation(self.generation);
+                    self.pending_previews.clear();
+                    self.pending_thumbnails.clear();
+                }
                 if matches!(
                     result.action,
-                    ActionId::ResizeImage | ActionId::ConvertImage
+                    ActionId::ResizeImage
+                        | ActionId::ConvertImage
+                        | ActionId::RotateLeft
+                        | ActionId::RotateRight
+                        | ActionId::FlipHorizontal
+                        | ActionId::FlipVertical
                 ) {
                     // Processing changes pixels even if a future encoder keeps a name.
                     let changed: Vec<_> = self
@@ -414,14 +571,39 @@ impl Workshop {
                         .map(|(i, _)| i)
                         .collect();
                     for i in changed {
-                        self.previews.remove(&i);
-                        self.thumbnails.remove(&i);
-                        self.errors.remove(&i);
-                        self.preview_order.retain(|n| *n != i);
-                        self.thumbnail_order.retain(|n| *n != i);
+                        self.invalidate_image(i);
                     }
                 }
-                self.gallery.as_mut().unwrap().include_files(&successes);
+                if let Some(saved) = completed.saved_preview
+                    && let Some(index) = self
+                        .gallery
+                        .as_ref()
+                        .unwrap()
+                        .photos()
+                        .iter()
+                        .position(|photo| photo.path == saved.published.path)
+                {
+                    // A completion proves which bytes were saved, not that the
+                    // path still names them. External edits/replacements must
+                    // take the ordinary decode path instead of installing stale pixels.
+                    if saved.published.is_current() {
+                        let texture = ctx.load_texture(
+                            format!("saved-{}-{}-{}", result.id, self.generation, index),
+                            saved.image,
+                            TextureOptions::LINEAR,
+                        );
+                        self.insert_ready_preview(index, texture);
+                        if let Some(timing) = &mut result.timing {
+                            timing.preview_ready_ms =
+                                Some(completed.submitted.elapsed().as_secs_f64() * 1000.0);
+                        }
+                    } else {
+                        self.request_preview(index);
+                    }
+                }
+                if !transformed {
+                    self.gallery.as_mut().unwrap().include_files(&successes);
+                }
                 if let Some(timing) = &mut result.timing {
                     timing.refresh_ms = refresh_started.elapsed().as_secs_f64() * 1000.0;
                 }
@@ -453,7 +635,7 @@ impl Workshop {
                     self.queue_mark_sync();
                     self.scroll_to_grid_anchor = true;
                 }
-                if apply && !successes.is_empty() {
+                if apply && !successes.is_empty() && !transformed {
                     let gallery = self.gallery.as_mut().unwrap();
                     gallery.select_path(&successes[0]);
                     if origin.view == View::Photo

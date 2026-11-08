@@ -2,7 +2,7 @@
 
 Afiocira currently targets Windows 11 x64 with a working OpenGL driver. The installer is unsigned and may trigger SmartScreen. It installs for the current user, bundles Yazi 26.5.6 and the Microsoft Visual C++ Redistributable, creates shortcuts, and registers **Open with** for decoded image formats. It does not change default file associations. Its uninstaller removes its own shortcuts and registration.
 
-The 2.0 installer follows the original public 1.0 test build. Independent Windows 11 installation and a successful GitHub Actions run remain unverified. The older `scripts/install-windows.ps1` and `scripts/unregister-windows.ps1` are development helpers for previous builds and use the `photo-gui.exe` registration.
+The 2.5.0 installer and portable ZIP are available from [v2.5.0](https://github.com/LilyAvelis/Afiocira/releases/tag/v2.5.0), following the public 2.0 release. See [the release record](release-2.5.md) for validation details and [Actions](https://github.com/LilyAvelis/Afiocira/actions) for remote CI results. Independent installation on another unprepared Windows 11 machine remains unverified. The older `scripts/install-windows.ps1` and `scripts/unregister-windows.ps1` are development helpers for previous builds and use the `photo-gui.exe` registration.
 
 Video components are fetched directly from upstream by the installer. Portable users run Enable-Video.cmd once before starting Afio; this step requires Internet access.
 
@@ -14,7 +14,7 @@ Inno Setup's current compiler is for non-commercial use; commercial installer di
 
 ## Local API
 
-Build `photo-cli` alongside the GUI. `photo-cli list <folder>` lists supported image names. `photo-cli ctl status` and other `ctl` commands control the first running GUI through a local Windows named pipe. `ctl-json` accepts one JSON command on stdin. Only one GUI can own the pipe. Requests are limited to 16 MiB and eight simultaneous clients. The API has no application-level authentication or read timeout. See [architecture](architecture.md) for the command contract.
+Build `photo-cli` alongside the GUI. `photo-cli list <folder>` lists supported image names. `photo-cli ctl status` and other `ctl` commands control the first running GUI through a local Windows named pipe. `ctl-json` accepts one JSON command on stdin. Only one GUI can own the pipe. Requests are limited to 16 MiB and eight simultaneous clients. The API has no application-level authentication. Request reads and response writes have 3-second I/O deadlines, GUI replies have a 15-second deadline, and the bounded dispatch queue admits at most eight pending clients. See [architecture](architecture.md) for the command contract.
 
 ## Dependency notices
 

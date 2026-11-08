@@ -4,7 +4,7 @@ use photo_core::actions::{ActionId, ActionInfo, Context};
 impl Workshop {
     pub(super) fn available_actions(&self) -> Vec<ActionInfo> {
         let gallery = self.gallery.as_ref();
-        photo_core::actions::available(&Context {
+        let mut actions = photo_core::actions::available(&Context {
             album_overview: self.album_mode() && gallery.is_some_and(|g| g.view() == View::Grid),
             space: gallery.is_some_and(|g| g.view() == View::Photo),
             targets: self.action_paths().len(),
@@ -14,13 +14,23 @@ impl Workshop {
             busy: self.operation.as_ref().is_some_and(|j| j.running),
             has_gallery: gallery.is_some(),
             marked: gallery.is_some_and(|g| !g.marked_paths().is_empty()),
-        })
+        });
+        let context = self.shortcut_context();
+        for action in &mut actions {
+            action.shortcut = shortcuts::effective(
+                &self.settings.shortcuts,
+                context,
+                action.id,
+                &action.shortcut,
+            );
+        }
+        actions
     }
     pub(super) fn run_action(&mut self, id: ActionId) -> Result<(), String> {
-        if self.image_dialog.is_some() || self.search.snapshot.open {
+        if id != ActionId::Settings && (self.image_dialog.is_some() || self.search.snapshot.open) {
             return Err("Close Everything search first".into());
         }
-        if self.delete_dialog.is_some() {
+        if id != ActionId::Settings && self.delete_dialog.is_some() {
             return Err("Confirm or cancel deletion first".into());
         }
         if !self.palette.open
@@ -34,15 +44,60 @@ impl Workshop {
                     | ActionId::Delete
             )
         {
-            self.focus_gallery()?;
+            return self.queue_navigator_command(Command::RunAction { id });
         }
         if !self.available_actions().iter().any(|a| a.id == id) {
             return Err("Action is not available in this context".into());
         }
         self.close_palette();
         match id {
+            ActionId::RotateLeft
+            | ActionId::RotateRight
+            | ActionId::FlipHorizontal
+            | ActionId::FlipVertical => {
+                let source = self
+                    .gallery
+                    .as_ref()
+                    .and_then(Gallery::selected_photo)
+                    .ok_or("Open an image first")?
+                    .path
+                    .clone();
+                let version = photo_core::rename::capture(&source).map_err(|e| e.to_string())?;
+                self.start_task(operations::TaskKind::Transform {
+                    source,
+                    version,
+                    action: id,
+                })
+            }
+            ActionId::CopyVideoFrame | ActionId::SaveVideoFrame => {
+                let source = self
+                    .gallery
+                    .as_ref()
+                    .and_then(Gallery::selected_photo)
+                    .ok_or("Open a video first")?
+                    .path
+                    .clone();
+                let version = photo_core::rename::capture(&source).map_err(|e| e.to_string())?;
+                let capture = self
+                    .video
+                    .as_ref()
+                    .ok_or("Video engine unavailable")?
+                    .lock()
+                    .map_err(|_| "Video engine unavailable")?
+                    .capture_frame(&source)?;
+                self.start_task(operations::TaskKind::VideoFrame {
+                    source,
+                    version,
+                    action: id,
+                    capture,
+                })
+            }
             ActionId::Copy | ActionId::Duplicate | ActionId::Paste => self.start_operation(id),
             ActionId::EnterAlbum => self.enter_album(),
+            ActionId::Open if self.album_mode() => {
+                self.album_open();
+                Ok(())
+            }
             ActionId::ResizeImage => self.begin_image(false),
             ActionId::ConvertImage => self.begin_image(true),
             ActionId::Search => self.open_search(),
@@ -51,6 +106,7 @@ impl Workshop {
             _ => {
                 let command = match id {
                     ActionId::Open => Command::OpenSelected,
+                    ActionId::Settings => Command::ShowSettings,
                     ActionId::Back => Command::Back,
                     ActionId::Next => Command::Next,
                     ActionId::Previous => Command::Previous,
@@ -79,7 +135,7 @@ impl Workshop {
             return Err("Confirm or cancel deletion first".into());
         }
         if self.active_pane == ActivePane::Yazi {
-            self.focus_gallery()?;
+            return self.queue_navigator_command(Command::ShowCommands);
         }
         self.palette.open = true;
         self.palette.query.clear();
@@ -107,6 +163,17 @@ impl Workshop {
             .native_keys
             .as_ref()
             .is_some_and(|hook| hook.take_paste());
+        // The hook is shared by this process's windows. A paste in Settings
+        // must never become a media import in the background gallery.
+        if !ctx.input(|i| i.focused) {
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, Key::Comma)) {
+            if let Some(error) = self.execute(Command::ShowSettings).error {
+                self.message = error.message;
+            }
+            return;
+        }
         if self.image_dialog.is_some()
             || self.rename_dialog.is_some()
             || self.delete_dialog.is_some()
@@ -152,28 +219,10 @@ impl Workshop {
         if self.active_pane != ActivePane::Yazi && ctx.memory(|m| m.focused().is_some()) {
             return;
         }
-        let action = ctx.input_mut(|input| {
-            if crate::delete_action::take_delete_press(input) {
-                return Some(ActionId::Delete);
-            }
-            if media_paste {
-                input.events.retain(|e| !matches!(e, egui::Event::Paste(_)));
-                return Some(ActionId::Paste);
-            }
-            if input.consume_key(egui::Modifiers::NONE, Key::F2) {
-                return Some(ActionId::Rename);
-            }
-            let copy = input.consume_key(egui::Modifiers::CTRL, Key::C)
-                || input.events.iter().any(|e| matches!(e, egui::Event::Copy));
-            if copy {
-                input.events.retain(|e| !matches!(e, egui::Event::Copy));
-                Some(ActionId::Copy)
-            } else if input.consume_key(egui::Modifiers::CTRL, Key::D) {
-                Some(ActionId::Duplicate)
-            } else {
-                None
-            }
-        });
+        let actions = self.available_actions();
+        let in_yazi = self.active_pane == ActivePane::Yazi;
+        let action =
+            ctx.input_mut(|input| shortcuts::take_action(input, actions, in_yazi, media_paste));
         if let Some(id) = action
             && let Some(error) = self.execute(Command::RunAction { id }).error
         {

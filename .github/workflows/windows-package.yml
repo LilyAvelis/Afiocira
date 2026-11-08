@@ -1,5 +1,7 @@
 name: Windows package validation
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 jobs:
@@ -20,26 +22,35 @@ jobs:
         shell: pwsh
         run: |
           $sep = [char]31
-          $env:CARGO_ENCODED_RUSTFLAGS = '-C' + $sep + 'target-feature=+crt-static' + $sep + "--remap-path-prefix=$env:GITHUB_WORKSPACE=AFIOCIRA_SOURCE"
+          $env:CARGO_ENCODED_RUSTFLAGS = '-C' + $sep + 'target-feature=+crt-static' + $sep + "--remap-path-prefix=$env:USERPROFILE=AFIOCIRA_BUILD" + $sep + "--remap-path-prefix=$env:GITHUB_WORKSPACE=AFIOCIRA_SOURCE"
           cargo build --locked --release --workspace --target-dir target/distribution
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./scripts/stage-windows-release.ps1
           $iscc = Get-ChildItem 'C:\Program Files (x86)\Inno Setup*\ISCC.exe','C:\Program Files\Inno Setup*\ISCC.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $iscc) { throw 'Inno Setup compiler not found' }
           & $iscc.FullName scripts/Afiocira.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path target/package-2.5.0/* -DestinationPath target/release-assets/Afiocira-2.5.0-Windows-x64.zip
+          Get-ChildItem target/release-assets/Afiocira-2.5.0-* -File | ForEach-Object {
+            '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+          } | Set-Content target/release-assets/SHA256SUMS.txt -Encoding ascii
       - name: Check and test
         shell: pwsh
         run: |
           cargo fmt --all -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo clippy --locked --workspace --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:APPDATA = "$env:RUNNER_TEMP\afio-config"
           New-Item -ItemType Directory -Force $env:APPDATA | Out-Null
-          $env:PATH = "$(Resolve-Path target/package-2.0.0/yazi);$env:PATH"
+          $env:PATH = "$(Resolve-Path target/package-2.5.0/yazi);$env:PATH"
           New-Item -ItemType Directory -Force target/debug/deps/fonts | Out-Null
-          Copy-Item target/package-2.0.0/fonts/* target/debug/deps/fonts
+          Copy-Item target/package-2.5.0/fonts/* target/debug/deps/fonts
+          cargo build --locked -p photo-cli
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked --workspace
       - uses: actions/upload-artifact@v4
         with:
-          name: Afiocira-2.0.0-Windows-x64
+          name: Afiocira-2.5.0-Windows-x64
           path: target/release-assets/*
           if-no-files-found: error

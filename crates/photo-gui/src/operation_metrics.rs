@@ -18,12 +18,25 @@ impl Workshop {
             gallery.grid_anchor()
         };
         photo_core::api::RenderState {
+            transform_animating: self.transform_animation.is_some(),
             preview_ready: self.previews.contains_key(&index),
             thumbnail_ready: self.thumbnails.contains_key(&index),
             next_preview_ready: self.previews.contains_key(&(index + 1)),
             cached_previews: self.previews.len(),
             preview_textures: self
                 .previews
+                .iter()
+                .filter_map(|(i, t)| {
+                    Some((
+                        gallery.photos().get(*i)?.path.clone(),
+                        match t.id() {
+                            egui::TextureId::Managed(n) | egui::TextureId::User(n) => n,
+                        },
+                    ))
+                })
+                .collect(),
+            fallback_preview_textures: self
+                .fallback_previews
                 .iter()
                 .filter_map(|(i, t)| {
                     Some((

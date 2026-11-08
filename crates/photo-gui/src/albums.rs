@@ -6,6 +6,30 @@ pub(super) struct Row {
     pub info: AlbumState,
     pub indices: Vec<usize>,
 }
+
+fn album_layout(available: f32, spacing: Vec2, scale: Option<f32>) -> GridLayout {
+    // Reserve the scrollbar and both album-frame margins before counting cells.
+    let width = (available - 32.0).max(1.0);
+    let columns = ((width + spacing.x) / (240.0 * scale.unwrap_or(1.0) + spacing.x))
+        .floor()
+        .max(1.0) as usize;
+    let tile_width = scale
+        .map(|factor| (TARGET_TILE_WIDTH * factor).min(width))
+        .unwrap_or((width - spacing.x * (columns - 1) as f32) / columns as f32)
+        .max(1.0);
+    GridLayout {
+        columns,
+        tile_width,
+        image_height: (tile_width * 0.75).clamp(64.0, 720.0),
+        row_height: 0.0,
+    }
+}
+
+fn album_window(position: usize, columns: usize) -> std::ops::Range<usize> {
+    let start = position / columns * columns;
+    start..start.saturating_add(columns)
+}
+
 impl Workshop {
     pub(super) fn album_mode(&self) -> bool {
         !self.nested.force_grid && !self.nested.snapshot.albums.is_empty()
@@ -131,7 +155,12 @@ impl Workshop {
             self.nested.advance = None;
         }
         *pos = (*pos).min(row.indices.len().saturating_sub(1));
-        if let Some(&index) = row.indices.get(*pos) {
+        if let Some(&index) = row.indices.get(*pos)
+            && self
+                .gallery
+                .as_ref()
+                .is_some_and(|g| g.grid_anchor() != index)
+        {
             self.execute(Command::Select { index });
         }
     }
@@ -281,16 +310,12 @@ impl Workshop {
         let available = ui
             .available_width()
             .min((ui.clip_rect().right() - ui.cursor().min.x).max(1.0));
-        let columns = ((available / 240.0).floor() as usize).clamp(1, 3);
-        let width = ((available - 16.0 - ui.spacing().item_spacing.x * (columns - 1) as f32)
-            / columns as f32)
-            .max(1.0);
-        let layout = GridLayout {
-            columns,
-            tile_width: width,
-            image_height: (width * 0.75).clamp(110.0, 260.0),
-            row_height: 0.0,
-        };
+        let layout = album_layout(
+            available,
+            ui.spacing().item_spacing,
+            self.settings.effective_gallery_scale(),
+        );
+        let columns = layout.columns;
         let height = layout.image_height + 100.0;
         let active = self.nested.cursor.clone();
         let mut seed = None;
@@ -307,8 +332,9 @@ impl Workshop {
                         .copied()
                         .unwrap_or(0)
                         .min(row.indices.len().saturating_sub(1));
-                    let start = (pos / columns) * columns;
-                    let end = (start + columns).min(row.indices.len());
+                    let window = album_window(pos, columns);
+                    let start = window.start;
+                    let end = window.end.min(row.indices.len());
                     let frame = egui::Frame::new()
                         .fill(if selected {
                             Color32::from_rgb(47, 47, 53)
@@ -340,9 +366,9 @@ impl Workshop {
                                             .to_string_lossy()
                                             .into_owned()
                                     });
-                                ui.add(
-                                    egui::Label::new(egui::RichText::new(name).strong()).truncate(),
-                                );
+                                // Reserve the controls before laying out the title. A
+                                // truncated label otherwise takes the whole header and
+                                // pushes the trailing buttons past the pane's right edge.
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
@@ -376,6 +402,13 @@ impl Workshop {
                                             row.indices.len(),
                                             if row.info.exhausted { "" } else { "+" }
                                         ));
+                                        ui.allocate_ui_with_layout(
+                                            egui::vec2(ui.available_width().max(0.0), ui.available_height()),
+                                            egui::Layout::left_to_right(egui::Align::Center),
+                                            |ui| {
+                                                ui.add(egui::Label::new(egui::RichText::new(name).strong()).truncate());
+                                            },
+                                        );
                                     },
                                 );
                             });
@@ -423,8 +456,10 @@ impl Workshop {
                             }
                         })
                         .response;
-                    if row.indices.is_empty()
+                    if row.indices.len() < window.end
                         && !row.info.exhausted
+                        && row.info.error.is_none()
+                        && !self.nested.snapshot.limited
                         && seed.is_none()
                         && (row.info.depth <= 1 || selected)
                         && response.rect.intersects(ui.clip_rect())
@@ -440,9 +475,62 @@ impl Workshop {
             });
         if self.active_pane == ActivePane::Gallery
             && !self.nested.snapshot.loading
+            && self.nested.pending_album.is_none()
             && let Some(folder) = seed
         {
             let _ = self.load_album(folder);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn album_capacity_tracks_width_scale_and_spacing_without_column_caps() {
+        let spacing = egui::vec2(8.0, 8.0);
+        let normal = album_layout(1800.0, spacing, None);
+        let small = album_layout(1800.0, spacing, Some(0.4));
+        let wide = album_layout(4096.0, spacing, Some(0.4));
+        assert!(normal.columns > 3);
+        assert!(small.columns > 12);
+        assert!(wide.columns > small.columns);
+        assert!(album_layout(1800.0, egui::vec2(32.0, 8.0), Some(0.4)).columns < small.columns);
+        assert_eq!(album_layout(120.0, spacing, Some(2.5)).columns, 1);
+    }
+
+    #[test]
+    fn album_cells_fill_inner_width_and_keep_cursor_in_the_window() {
+        for scale in [None, Some(0.4), Some(0.65), Some(2.5)] {
+            let layout = album_layout(1470.0, egui::vec2(8.0, 8.0), scale);
+            let filled =
+                layout.tile_width * layout.columns as f32 + 8.0 * (layout.columns - 1) as f32;
+            assert!(filled <= 1470.0 - 32.0 + 0.01);
+            if scale.is_none() {
+                assert!((filled - (1470.0 - 32.0)).abs() < 0.01);
+            }
+            for position in [0, 4, 5, 19, 40] {
+                let window = album_window(position, layout.columns);
+                assert!(window.contains(&position));
+                assert_eq!(window.len(), layout.columns);
+            }
+        }
+    }
+
+    #[test]
+    fn automatic_cards_fill_resized_windows_while_manual_cards_keep_their_size() {
+        let spacing = egui::vec2(8.0, 8.0);
+        for layout in [grid_layout, album_layout] {
+            let first = layout(820.0, spacing, None);
+            let resized = layout(900.0, spacing, None);
+            assert_eq!(first.columns, resized.columns);
+            assert!(resized.tile_width > first.tile_width);
+            let manual = layout(820.0, spacing, Some(0.65));
+            let manual_resized = layout(1700.0, spacing, Some(0.65));
+            assert_eq!(manual.tile_width, manual_resized.tile_width);
+            assert!(manual_resized.columns > manual.columns);
+            assert!(layout(100.0, spacing, Some(2.5)).tile_width <= 100.0);
         }
     }
 }

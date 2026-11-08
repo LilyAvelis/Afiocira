@@ -1,7 +1,33 @@
 use super::*;
 
 impl Workshop {
+    pub(super) fn insert_ready_preview(&mut self, index: usize, texture: egui::TextureHandle) {
+        self.fallback_previews.remove(&index);
+        self.errors.remove(&index);
+        self.previews.insert(index, texture);
+        self.preview_order.retain(|item| *item != index);
+        self.preview_order.push_back(index);
+        while self.preview_order.len() > PREVIEW_CACHE_LIMIT
+            || (self.previews.len() > 1
+                && self
+                    .previews
+                    .values()
+                    .map(|texture| {
+                        let [width, height] = texture.size();
+                        width.saturating_mul(height).saturating_mul(4)
+                    })
+                    .sum::<usize>()
+                    > PREVIEW_CACHE_BYTES)
+        {
+            if let Some(oldest) = self.preview_order.pop_front() {
+                self.previews.remove(&oldest);
+            }
+        }
+        self.pending_previews.remove(&index);
+    }
+
     pub(super) fn clear_cached_images(&mut self) {
+        self.fallback_previews.clear();
         self.thumbnails.clear();
         self.thumbnail_order.clear();
         self.pending_thumbnails.clear();
@@ -36,6 +62,10 @@ impl Workshop {
             .into_iter()
             .filter_map(|(index, image)| Some((remap.get(index).copied().flatten()?, image)))
             .collect();
+        self.fallback_previews = std::mem::take(&mut self.fallback_previews)
+            .into_iter()
+            .filter_map(|(index, image)| Some((remap.get(index).copied().flatten()?, image)))
+            .collect();
         self.errors = std::mem::take(&mut self.errors)
             .into_iter()
             .filter_map(|(index, error)| Some((remap.get(index).copied().flatten()?, error)))
@@ -67,25 +97,7 @@ impl Workshop {
                         TextureOptions::LINEAR,
                     );
                     if result.preview {
-                        self.previews.insert(result.index, texture);
-                        self.preview_order.push_back(result.index);
-                        while self.preview_order.len() > PREVIEW_CACHE_LIMIT
-                            || (self.previews.len() > 1
-                                && self
-                                    .previews
-                                    .values()
-                                    .map(|texture| {
-                                        let [width, height] = texture.size();
-                                        width.saturating_mul(height).saturating_mul(4)
-                                    })
-                                    .sum::<usize>()
-                                    > PREVIEW_CACHE_BYTES)
-                        {
-                            if let Some(oldest) = self.preview_order.pop_front() {
-                                self.previews.remove(&oldest);
-                            }
-                        }
-                        self.pending_previews.remove(&result.index);
+                        self.insert_ready_preview(result.index, texture);
                     } else {
                         self.thumbnails.insert(result.index, texture);
                         self.thumbnail_order.push_back(result.index);
@@ -98,6 +110,9 @@ impl Workshop {
                     }
                 }
                 Err(error) => {
+                    if result.preview {
+                        self.fallback_previews.remove(&result.index);
+                    }
                     self.errors.insert(result.index, error);
                     if result.preview {
                         self.pending_previews.remove(&result.index);
@@ -107,6 +122,45 @@ impl Workshop {
                 }
             }
         }
+    }
+
+    /// Keep the last decoded frame visible until a replacement preview arrives.
+    /// It is deliberately separate from the current-version ready caches.
+    pub(super) fn invalidate_image(&mut self, index: usize) {
+        if let Some(image) = self
+            .previews
+            .remove(&index)
+            .or_else(|| self.thumbnails.get(&index).cloned())
+        {
+            self.fallback_previews.insert(index, image);
+            while self.fallback_previews.len() > PREVIEW_CACHE_LIMIT
+                || (self.fallback_previews.len() > 1
+                    && self
+                        .fallback_previews
+                        .values()
+                        .map(|texture| {
+                            let [width, height] = texture.size();
+                            width.saturating_mul(height).saturating_mul(4)
+                        })
+                        .sum::<usize>()
+                        > PREVIEW_CACHE_BYTES)
+            {
+                if let Some(oldest) = self
+                    .fallback_previews
+                    .keys()
+                    .copied()
+                    .find(|item| *item != index)
+                {
+                    self.fallback_previews.remove(&oldest);
+                } else {
+                    break;
+                }
+            }
+        }
+        self.thumbnails.remove(&index);
+        self.errors.remove(&index);
+        self.thumbnail_order.retain(|item| *item != index);
+        self.preview_order.retain(|item| *item != index);
     }
 
     pub(super) fn request_thumbnail(&mut self, index: usize) {

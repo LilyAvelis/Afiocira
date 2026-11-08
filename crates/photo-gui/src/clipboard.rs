@@ -114,6 +114,21 @@ pub fn copy(paths: &[PathBuf]) -> Result<Vec<String>, String> {
     Ok(warnings)
 }
 
+/// Pixel-only ownership; never publishes a temporary file reference.
+pub fn copy_pixels(path: &Path) -> Result<(), String> {
+    let pixels = image_dib(path)?;
+    let mut clipboard = None;
+    for _ in 0..20 {
+        if let Ok(open) = clipboard_win::Clipboard::new() {
+            clipboard = Some(open);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let _clipboard = clipboard.ok_or("Clipboard is busy; try again")?;
+    clipboard_win::raw::set(17, &pixels).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

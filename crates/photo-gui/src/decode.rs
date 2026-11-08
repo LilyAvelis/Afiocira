@@ -8,6 +8,19 @@ use eframe::egui::{self, ColorImage};
 use image::{DynamicImage, ImageDecoder};
 
 const QUEUE_LIMIT: usize = 24;
+pub const PREVIEW_MAX_SIDE: u32 = 2560;
+
+/// Build the same bounded display pixels for disk decodes and verified saves.
+/// The caller has already normalized EXIF orientation.
+pub fn preview_from_pixels(image: DynamicImage) -> ColorImage {
+    display_pixels(image, PREVIEW_MAX_SIDE)
+}
+
+fn display_pixels(image: DynamicImage, max_side: u32) -> ColorImage {
+    let image = image.thumbnail(max_side, max_side).to_rgba8();
+    let size = [image.width() as usize, image.height() as usize];
+    ColorImage::from_rgba_unmultiplied(size, image.as_raw())
+}
 
 pub struct DecodeTask {
     pub generation: u64,
@@ -114,7 +127,10 @@ pub fn spawn_worker(
             if task.generation != queue.generation.load(Ordering::Acquire) {
                 continue;
             }
-            let image = decode(&task.path, if task.preview { 2560 } else { 320 });
+            let image = decode(
+                &task.path,
+                if task.preview { PREVIEW_MAX_SIDE } else { 320 },
+            );
             if task.generation != queue.generation.load(Ordering::Acquire) {
                 continue;
             }
@@ -153,9 +169,7 @@ fn decode(path: &Path, max_side: u32) -> Result<ColorImage, String> {
     let mut image = DynamicImage::from_decoder(decoder)
         .map_err(|error| format!("Cannot decode {}: {error}", path.display()))?;
     image.apply_orientation(orientation);
-    let image = image.thumbnail(max_side, max_side).to_rgba8();
-    let size = [image.width() as usize, image.height() as usize];
-    Ok(ColorImage::from_rgba_unmultiplied(size, image.as_raw()))
+    Ok(display_pixels(image, max_side))
 }
 
 fn video_thumbnail(path: &Path, max_side: u32) -> Result<ColorImage, String> {

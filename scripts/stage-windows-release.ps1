@@ -1,4 +1,4 @@
-param([string]$BuildDirectory = 'target\distribution\release', [string]$OutputDirectory = 'target\package-2.0.0')
+param([string]$BuildDirectory = 'target\distribution\release', [string]$OutputDirectory = 'target\package-2.5.0')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $buildPath = if ([IO.Path]::IsPathRooted($BuildDirectory)) {$BuildDirectory} else {Join-Path $root $BuildDirectory}
@@ -52,7 +52,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\enable-vid
 if errorlevel 1 (echo Video setup failed. Check the connection and retry. & pause & exit /b 1)
 pause' | Set-Content -LiteralPath (Join-Path $stage 'Enable-Video.cmd') -Encoding ascii
 @'
-Afiocira source: https://github.com/LilyAvelis/Afiocira (v2.0.0), MIT.
+Afiocira source: https://github.com/LilyAvelis/Afiocira (v2.5.0), MIT.
 Yazi 26.5.6: https://github.com/sxyazi/yazi/tree/v26.5.6, MIT.
 Everything ES: see Everything-ES-LICENSE.txt and Everything-ES-PROVENANCE.txt.
 Nerd Fonts JetBrains Mono3.5.1: https://github.com/ryanoasis/nerd-fonts/tree/v3.5.1; OFL included.
@@ -68,5 +68,5 @@ $files = Get-ChildItem -LiteralPath $stage -Recurse -File | Where-Object Name -n
     [pscustomobject]@{path=[IO.Path]::GetRelativePath($stage,$_.FullName);bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
 }
 $commit = git -C $root rev-parse HEAD
-[pscustomobject]@{version='2.0.0';source_commit=$commit;files=@($files)} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage 'PACKAGE-MANIFEST.json') -Encoding utf8
+[pscustomobject]@{version='2.5.0';source_commit=$commit;files=@($files)} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage 'PACKAGE-MANIFEST.json') -Encoding utf8
 Write-Output "Staged release: $stage"

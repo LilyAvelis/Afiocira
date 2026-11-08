@@ -9,6 +9,8 @@ pub mod file_ops;
 pub mod import;
 pub mod nested;
 pub mod rename;
+pub mod selection;
+pub mod settings;
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Photo {
@@ -170,6 +172,7 @@ impl ZoomState {
 }
 #[derive(Debug)]
 pub struct Gallery {
+    collection_id: u64,
     folder: PathBuf,
     photos: Vec<Photo>,
     view: View,
@@ -182,10 +185,25 @@ pub struct Gallery {
     zoom: ZoomState,
 }
 impl Gallery {
+    pub fn collection_id(&self) -> u64 {
+        self.collection_id
+    }
+
+    pub fn selection_scope(&self) -> selection::SelectionScope {
+        selection::SelectionScope::new(
+            self.collection_id,
+            self.photos.iter().map(|p| p.path.clone()),
+        )
+    }
+
     pub fn open(folder: &Path) -> io::Result<Self> {
         let folder = fs::canonicalize(folder)?;
         let photos = list_photos(&folder)?;
         Ok(Self {
+            collection_id: {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
             folder,
             photos,
             view: View::Grid,
@@ -664,6 +682,7 @@ mod tests {
             })
             .collect();
         let mut gallery = Gallery {
+            collection_id: 1,
             folder: PathBuf::from("photos"),
             photos,
             view: View::Grid,
@@ -695,6 +714,7 @@ mod tests {
             })
             .collect();
         let mut gallery = Gallery {
+            collection_id: 1,
             folder: PathBuf::from("photos"),
             photos,
             view: View::Grid,

@@ -75,11 +75,7 @@ impl Workshop {
         let state = player.lock().unwrap().state.clone();
         ui.horizontal_wrapped(|ui| {
             if ui
-                .button(if state.paused {
-                    "Play (P)"
-                } else {
-                    "Pause (P)"
-                })
+                .button(if state.paused { "Play" } else { "Pause" })
                 .clicked()
             {
                 self.execute(Command::VideoPause {
@@ -123,7 +119,7 @@ impl Workshop {
             if ui
                 .add(egui::Button::image_and_text(
                     Lucide::Images.size(16.0).image(),
-                    "Gallery · Esc/Space",
+                    "Gallery",
                 ))
                 .clicked()
             {
@@ -183,6 +179,7 @@ impl Workshop {
             self.video_view(ui);
             return;
         }
+        self.retire_transform_animation();
         self.prefetch_previews(index);
         let name = self.gallery.as_ref().unwrap().photos()[index].name.clone();
         ui.add(egui::Label::new(name).truncate());
@@ -197,10 +194,16 @@ impl Workshop {
             self.active_pane = ActivePane::Gallery;
         }
         if let Some(texture) = self
-            .previews
-            .get(&index)
-            .or_else(|| self.thumbnails.get(&index))
-            .cloned()
+            .transform_animation
+            .as_ref()
+            .map(|animation| animation.texture())
+            .or_else(|| {
+                self.previews
+                    .get(&index)
+                    .or_else(|| self.thumbnails.get(&index))
+                    .or_else(|| self.fallback_previews.get(&index))
+                    .cloned()
+            })
         {
             let natural = texture.size_vec2();
             let fitted = crate::layout::fit_rect(rect, natural).size();
@@ -259,6 +262,15 @@ impl Workshop {
             let gallery = self.gallery.as_mut().unwrap();
             gallery.constrain_zoom(viewport, fitted_size);
             let zoom = gallery.zoom();
+            if let Some(animation) = &self.transform_animation {
+                animation.paint(
+                    ui,
+                    rect,
+                    zoom.factor,
+                    Vec2::new(zoom.offset.x, zoom.offset.y),
+                );
+                return;
+            }
             let image_rect = egui::Rect::from_center_size(
                 rect.center() + Vec2::new(zoom.offset.x, zoom.offset.y),
                 fitted * zoom.factor,

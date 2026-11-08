@@ -17,22 +17,41 @@ const MAX_PIXELS: u64 = 32_000_000;
 
 fn read_bounded(path: &Path) -> Result<Vec<u8>, ConversionFailure> {
     let file = fs::File::open(path).map_err(fail)?;
-    if file.metadata().map_err(fail)?.len() > MAX_FILE_BYTES {
+    let initial_size = file.metadata().map_err(fail)?.len();
+    if initial_size > MAX_FILE_BYTES {
+        return Err(fail("Conversion source exceeds 64 MiB"));
+    }
+    read_bounded_bytes(file.take(MAX_FILE_BYTES + 1), initial_size as usize)
+}
+
+fn read_bounded_bytes(
+    mut reader: impl Read,
+    initial_size: usize,
+) -> Result<Vec<u8>, ConversionFailure> {
+    if initial_size as u64 > MAX_FILE_BYTES {
         return Err(fail("Conversion source exceeds 64 MiB"));
     }
     let mut bytes = Vec::new();
-    let mut limited = file.take(MAX_FILE_BYTES + 1);
+    // Reserve the checked size once. Reserving every chunk exactly would copy
+    // growing buffers repeatedly during source/stage/backup verification.
+    bytes.try_reserve_exact(initial_size).map_err(fail)?;
     let mut chunk = [0u8; 65536];
     loop {
-        let n = limited.read(&mut chunk).map_err(fail)?;
+        let n = reader.read(&mut chunk).map_err(fail)?;
         if n == 0 {
             break;
         }
-        bytes.try_reserve_exact(n).map_err(fail)?;
+        if bytes
+            .len()
+            .checked_add(n)
+            .is_none_or(|size| size > initial_size || size as u64 > MAX_FILE_BYTES)
+        {
+            return Err(fail("File changed while reading"));
+        }
         bytes.extend_from_slice(&chunk[..n]);
     }
-    if bytes.len() as u64 > MAX_FILE_BYTES {
-        return Err(fail("Conversion source exceeds 64 MiB"));
+    if bytes.len() != initial_size {
+        return Err(fail("File changed while reading"));
     }
     Ok(bytes)
 }
@@ -338,17 +357,50 @@ fn unique_name(label: &str) -> String {
         label
     )
 }
+/// Saved-file identity, captured from the verified stage before publication.
+#[derive(Debug)]
+pub struct PublishedFile {
+    pub path: PathBuf,
+    pub version: SourceVersion,
+}
+impl PublishedFile {
+    pub fn is_current(&self) -> bool {
+        rename::capture(&self.path).is_ok_and(|version| version == self.version)
+    }
+}
+
+/// Reuse the checked staging/backup/rollback transaction for same-path edits.
+pub fn replace_same_file(
+    source: &Path,
+    version: &SourceVersion,
+    original: Vec<u8>,
+    encoded: Vec<u8>,
+) -> Result<PublishedFile, ConversionFailure> {
+    commit_checked(PreparedConversion {
+        source: source.to_path_buf(),
+        target: source.to_path_buf(),
+        original,
+        version: version.clone(),
+        encoded,
+        dimensions: (0, 0),
+    })
+}
+
 /// Commits on the same volume. A crash can leave a staging/backup file; errors
 /// list every retained path. Success removes the original only after verified
 /// output has been published. Filesystems must support no-clobber rename.
 pub fn commit(prepared: PreparedConversion) -> Result<PathBuf, ConversionFailure> {
+    commit_checked(prepared).map(|published| published.path)
+}
+
+fn commit_checked(prepared: PreparedConversion) -> Result<PublishedFile, ConversionFailure> {
     let p = prepared;
     if rename::capture(&p.source).map_err(fail)? != p.version
         || read_bounded(&p.source)? != p.original
     {
         return Err(fail("Source changed since preparation"));
     }
-    if p.target.try_exists().map_err(fail)? {
+    if p.target != p.source && p.target.try_exists().map_err(fail)? {
         return Err(fail("Destination already exists"));
     }
     let parent = p
@@ -388,44 +440,68 @@ pub fn commit(prepared: PreparedConversion) -> Result<PathBuf, ConversionFailure
             "Source content changed while staging",
         ))
     } else {
-        rename::capture(&temp).and_then(|v| {
+        rename::capture(&temp).and_then(|version| {
             rename::rename_checked(
                 &temp,
                 p.target.file_name().and_then(|s| s.to_str()).unwrap_or(""),
-                &v,
+                &version,
             )
+            .map(|path| PublishedFile { path, version })
         })
     };
-    if let Err(e) = publish {
-        let restore = rename::capture(&backup).and_then(|v| {
-            rename::rename_checked(
-                &backup,
-                p.source.file_name().and_then(|s| s.to_str()).unwrap_or(""),
-                &v,
-            )
-        });
-        let _ = fs::remove_file(&temp);
-        return Err(ConversionFailure {
-            message: format!("Publication failed: {e}; restoration: {restore:?}"),
-            recovery_paths: if restore.is_ok() {
-                vec![p.source]
-            } else {
-                vec![backup, p.source]
-            },
-        });
-    }
+    let published = match publish {
+        Ok(published) => published,
+        Err(e) => {
+            let restore = rename::capture(&backup).and_then(|v| {
+                rename::rename_checked(
+                    &backup,
+                    p.source.file_name().and_then(|s| s.to_str()).unwrap_or(""),
+                    &v,
+                )
+            });
+            let _ = fs::remove_file(&temp);
+            return Err(ConversionFailure {
+                message: format!("Publication failed: {e}; restoration: {restore:?}"),
+                recovery_paths: if restore.is_ok() {
+                    vec![p.source]
+                } else {
+                    vec![backup, p.source]
+                },
+            });
+        }
+    };
     if let Err(e) = fs::remove_file(&backup) {
         return Err(ConversionFailure {
             message: format!("Output published but original backup cleanup failed: {e}"),
             recovery_paths: vec![p.target, backup],
         });
     }
-    Ok(p.target)
+    Ok(published)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bounded_reader_preserves_large_payload_and_rejects_size_changes() {
+        let payload: Vec<u8> = (0..4 * 1024 * 1024 + 57)
+            .map(|index| (index % 251) as u8)
+            .collect();
+        assert_eq!(
+            read_bounded_bytes(Cursor::new(&payload), payload.len()).unwrap(),
+            payload
+        );
+        for expected_size in [payload.len() - 1, payload.len() + 1] {
+            assert!(
+                read_bounded_bytes(Cursor::new(&payload), expected_size)
+                    .unwrap_err()
+                    .message
+                    .contains("changed while reading")
+            );
+        }
+        assert!(read_bounded_bytes(Cursor::new([]), MAX_FILE_BYTES as usize + 1).is_err());
+    }
+
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self {
@@ -453,6 +529,22 @@ mod tests {
             let _ = fs::remove_dir_all(&self.0);
         }
     }
+    #[test]
+    fn publication_receipt_survives_rename_and_rejects_external_replacement() {
+        let dir = Fixture::new();
+        let source = dir.source();
+        let prepared = prepare(&source, OutputFormat::WebP, ConversionOptions::default()).unwrap();
+        let published = commit_checked(prepared).unwrap();
+        assert_eq!(published.version, rename::capture(&published.path).unwrap());
+        assert!(published.is_current());
+
+        // Identical bytes at the same path still belong to a different file.
+        let bytes = fs::read(&published.path).unwrap();
+        fs::rename(&published.path, dir.0.join("old.webp")).unwrap();
+        fs::write(&published.path, bytes).unwrap();
+        assert!(!published.is_current());
+    }
+
     #[test]
     fn lossless_roundtrip_replaces_original() {
         let dir = Fixture::new();

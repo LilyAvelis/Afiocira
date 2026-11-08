@@ -21,7 +21,7 @@ impl Workshop {
             return Err("A file action is already running".into());
         }
         if self.active_pane == ActivePane::Yazi {
-            self.focus_gallery()?;
+            return self.queue_navigator_command(Command::BeginRename);
         }
         let paths = self.action_paths();
         if paths.len() != 1 {

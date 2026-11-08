@@ -7,8 +7,15 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
+#[cfg(windows)]
+mod yazi_bootstrap;
+
 fn main() -> ExitCode {
     let arguments: Vec<OsString> = env::args_os().skip(1).collect();
+    #[cfg(windows)]
+    if arguments.first().is_some_and(|arg| arg == "yazi-bootstrap") {
+        return yazi_bootstrap::run(&arguments[1..]);
+    }
     if arguments.first().is_some_and(|arg| arg == "ctl") {
         return control(&arguments[1..]);
     }
@@ -53,6 +60,8 @@ fn main() -> ExitCode {
 fn control(args: &[OsString]) -> ExitCode {
     let command = match args {
         [action] if action == "status" => Command::Status,
+        [action] if action == "settings" => Command::ShowSettings,
+        [action] if action == "close-settings" => Command::CloseSettings,
         [action] if action == "enter-album" => Command::EnterAlbum,
         [action] if action == "navigator-snapshot" => Command::NavigatorSnapshot,
         [action] if action == "nested" => Command::LoadNested { deeper: false },

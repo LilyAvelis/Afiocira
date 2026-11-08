@@ -99,17 +99,49 @@ impl Workshop {
         if let Some(events) = &self.file_events {
             let mut saw_event = false;
             for event in events.try_iter() {
+                let event = match event {
+                    Ok(mut event) => {
+                        if matches!(event.kind, notify::EventKind::Access(_)) {
+                            continue;
+                        }
+                        let membership = matches!(
+                            event.kind,
+                            notify::EventKind::Create(_)
+                                | notify::EventKind::Remove(_)
+                                | notify::EventKind::Modify(notify::event::ModifyKind::Name(_))
+                        );
+                        let prefix = format!(".photo-convert-{}-", std::process::id());
+                        event.paths.retain(|path| {
+                            if path
+                                .file_name()
+                                .is_some_and(|n| n.to_string_lossy().starts_with(&prefix))
+                            {
+                                return false;
+                            }
+                            !(membership && operations::own_transform_membership(path))
+                        });
+                        if event.paths.is_empty() {
+                            continue;
+                        }
+                        Ok(event)
+                    }
+                    Err(error) => Err(error),
+                };
                 saw_event = true;
                 match event {
                     Ok(event) if !event.paths.is_empty() => {
-                        // Membership changes do not change surviving pixels. Content
-                        // writes still invalidate the affected cached images.
+                        // A create/rename/remove on an existing path can be an atomic
+                        // replacement. Invalidate that path too; unaffected paths
+                        // retain their ready textures through the refresh.
                         let pixels_changed = matches!(
                             event.kind,
                             notify::EventKind::Any
                                 | notify::EventKind::Other
+                                | notify::EventKind::Create(_)
+                                | notify::EventKind::Remove(_)
                                 | notify::EventKind::Modify(
                                     notify::event::ModifyKind::Any
+                                        | notify::event::ModifyKind::Name(_)
                                         | notify::event::ModifyKind::Data(_)
                                         | notify::event::ModifyKind::Metadata(_)
                                 )
@@ -146,6 +178,9 @@ impl Workshop {
                 self.remap_cached_images(&old_paths);
             }
             if self.dirty_all {
+                self.generation += 1;
+                self.thumbnail_tasks.set_generation(self.generation);
+                self.preview_tasks.set_generation(self.generation);
                 self.clear_cached_images();
             }
             match refreshed {
@@ -172,11 +207,7 @@ impl Workshop {
                         self.pending_thumbnails.clear();
                         self.pending_previews.clear();
                         for index in dirty {
-                            self.thumbnails.remove(&index);
-                            self.previews.remove(&index);
-                            self.errors.remove(&index);
-                            self.thumbnail_order.retain(|item| *item != index);
-                            self.preview_order.retain(|item| *item != index);
+                            self.invalidate_image(index);
                         }
                     }
                 }

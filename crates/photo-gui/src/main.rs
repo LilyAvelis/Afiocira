@@ -11,6 +11,7 @@ mod drop_input;
 mod everything;
 mod file_state;
 mod frame_capture;
+mod gallery_scale;
 mod gallery_view;
 mod image_actions;
 mod image_cache;
@@ -26,11 +27,22 @@ mod operations;
 mod palette;
 mod rename_action;
 mod resize_image;
+mod scroll_navigation;
 mod search;
 mod search_icons;
+mod settings;
+mod settings_yazi;
+mod shortcuts;
+mod transform_animation;
+mod ui_foundation;
 mod ui_style;
 mod video;
 mod yazi;
+mod yazi_flavors;
+mod yazi_key_capture;
+mod yazi_profile;
+mod yazi_settings;
+mod yazi_transport;
 use decode::{DecodeQueue, DecodeResult, DecodeTask, spawn_worker};
 use eframe::egui::{self, Color32, Key, TextureHandle, TextureOptions, Vec2};
 use egui_lucide::Lucide;
@@ -54,14 +66,17 @@ struct GridLayout {
     image_height: f32,
     row_height: f32,
 }
-fn grid_layout(available_width: f32, spacing: Vec2) -> GridLayout {
+fn grid_layout(available_width: f32, spacing: Vec2, scale: Option<f32>) -> GridLayout {
     // Leave room for the vertical scrollbar so the final column stays visible.
     let width = (available_width - 16.0).max(1.0);
-    let columns = ((width + spacing.x) / (TARGET_TILE_WIDTH + spacing.x))
+    let columns = ((width + spacing.x) / (TARGET_TILE_WIDTH * scale.unwrap_or(1.0) + spacing.x))
         .floor()
         .max(1.0) as usize;
-    let tile_width = ((width - spacing.x * (columns - 1) as f32) / columns as f32).max(1.0);
-    let image_height = (tile_width * 0.8).clamp(150.0, 360.0);
+    let tile_width = scale
+        .map(|factor| (TARGET_TILE_WIDTH * factor).min(width))
+        .unwrap_or((width - spacing.x * (columns - 1) as f32) / columns as f32)
+        .max(1.0);
+    let image_height = (tile_width * 0.8).clamp(64.0, 720.0);
     GridLayout {
         columns,
         tile_width,
@@ -75,6 +90,10 @@ enum ActivePane {
     Gallery,
 }
 struct Workshop {
+    transform_animation: Option<transform_animation::Animation>,
+    navigation: navigator::State,
+    yazi_settings: yazi_settings::State,
+    settings: settings::State,
     image_dialog: Option<image_actions::Dialog>,
     nested: nested_view::State,
     search: search::State,
@@ -113,6 +132,7 @@ struct Workshop {
     thumbnail_order: VecDeque<usize>,
     pending_thumbnails: HashSet<usize>,
     previews: HashMap<usize, TextureHandle>,
+    fallback_previews: HashMap<usize, TextureHandle>,
     preview_order: VecDeque<usize>,
     pending_previews: HashSet<usize>,
     errors: HashMap<usize, String>,
@@ -161,6 +181,10 @@ impl Workshop {
             Err(error) => (None, Some(format!("Live API unavailable: {error}"))),
         };
         let mut app = Self {
+            transform_animation: None,
+            navigation: navigator::State::default(),
+            yazi_settings: yazi_settings::State::default(),
+            settings: settings::State::load(),
             image_dialog: None,
             nested: nested_view::State::new(ctx.clone()),
             search: search::State::default(),
@@ -206,6 +230,7 @@ impl Workshop {
             thumbnail_order: VecDeque::new(),
             pending_thumbnails: HashSet::new(),
             previews: HashMap::new(),
+            fallback_previews: HashMap::new(),
             preview_order: VecDeque::new(),
             pending_previews: HashSet::new(),
             errors: HashMap::new(),
@@ -236,19 +261,24 @@ impl eframe::App for Workshop {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         frame_capture::poll(&ctx);
-        self.poll_operations();
+        self.poll_operations(&ctx);
         self.sync_video();
         self.poll_api();
+        self.poll_navigator();
+        self.poll_yazi_settings();
         self.poll_search();
         self.poll_nested();
         if let Some(error) = self.yazi.as_mut().and_then(YaziPane::take_navigation_error) {
             self.message = error;
         }
-        self.global_action_keys(&ctx);
+        if !self.palette_shortcut_input(&ctx) {
+            self.global_action_keys(&ctx);
+        }
         self.handle_dropped_files(&ctx);
         self.actions_footer(ui);
         self.poll_file_changes();
         self.poll_results(&ctx);
+        self.retire_transform_animation();
         if let Some(folder) = self.yazi.as_mut().and_then(YaziPane::changed_folder) {
             self.follow_navigator_folder(folder);
             if let Some(yazi) = &self.yazi {
@@ -363,7 +393,8 @@ impl eframe::App for Workshop {
                     ));
                     ui.separator();
                     if yazi.is_running() {
-                        let events = if self.search.snapshot.open
+                        let events = if self.yazi_settings.busy()
+                            || self.search.snapshot.open
                             || self.palette.open
                             || self.image_dialog.is_some()
                             || self.rename_dialog.is_some()
@@ -375,12 +406,13 @@ impl eframe::App for Workshop {
                         };
                         terminal_has_focus = ui
                             .add_enabled_ui(
-                                !self.search.snapshot.open
+                                !self.yazi_settings.busy()
+                                    && !self.search.snapshot.open
                                     && !self.palette.open
                                     && self.image_dialog.is_none()
                                     && self.rename_dialog.is_none()
                                     && self.delete_dialog.is_none(),
-                                |ui| yazi.ui(ui, self.nerd_font_loaded),
+                                |ui| yazi.ui(ui, self.nerd_font_loaded, self.settings.text_size),
                             )
                             .inner;
                         if let Some(events) = events {
@@ -415,11 +447,15 @@ impl eframe::App for Workshop {
             && self.delete_dialog.is_none()
             && !ctx.memory(|memory| memory.focused().is_some())
         {
-            let layout = grid_layout(ui.available_width(), ui.spacing().item_spacing);
+            let layout = grid_layout(
+                ui.available_width(),
+                ui.spacing().item_spacing,
+                self.settings.effective_gallery_scale(),
+            );
             self.key_input(&ctx, layout.columns);
         }
         let gallery_heading = if self.active_pane == ActivePane::Gallery {
-            "GALLERY · стрелки — выбор · Space — открыть"
+            "GALLERY · стрелки — выбор · Ctrl+K — Actions"
         } else {
             "Gallery · Tab"
         };
@@ -446,6 +482,7 @@ impl eframe::App for Workshop {
         self.delete_popup(&ctx);
         self.poll_mark_sync();
         self.poll_visual_probe();
+        self.settings_window(&ctx);
     }
 }
 fn pasted_path(text: &str) -> PathBuf {

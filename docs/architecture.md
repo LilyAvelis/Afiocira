@@ -14,7 +14,7 @@ The image-only decode limits below still describe still-image previews.
 | `photo-core::api` | Versioned serializable command, response, session snapshot, error code. |
 | `photo-gui::Workshop` | One live session and dispatcher. GUI keys/buttons, Yazi folder reports, and local API requests call `execute(Command)`. |
 | `photo-gui::decode` | Separate bounded thumbnail/preview queues. Work from an older folder generation is dropped. |
-| `photo-gui::yazi` | Native Yazi in ConPTY with a private config copy; reports hovered folders with monotonic event serials and exchanges cursor/marks through a private plugin and DDS. |
+| `photo-gui::yazi` | Native Yazi in ConPTY with a private config copy; reports hovered folders with monotonic event serials and exchanges state/commands through per-session file mailboxes and a private plugin. Core pane handoff does not require shared DDS. |
 | `photo-gui::ipc` | Windows local named pipe. Requests are JSON lines; responses are JSON lines. |
 | `photo-cli` | `ctl` and `ctl-json` control the live GUI. `browse` and `open` are independent offline sessions for core debugging. |
 

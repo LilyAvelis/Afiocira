@@ -1,5 +1,5 @@
-#define Version "2.0.0"
-#define Stage "..\target\package-2.0.0"
+#define Version "2.5.0"
+#define Stage "..\target\package-2.5.0"
 [Setup]
 AppId={code:ApplicationId}
 AppName=Afiocira
@@ -14,7 +14,7 @@ WizardStyle=modern
 UsePreviousLanguage=no
 LicenseFile=..\LICENSE
 OutputDir=..\target\release-assets
-OutputBaseFilename=Afiocira-2.0.0-Setup-Windows-x64
+OutputBaseFilename=Afiocira-{#Version}-Setup-Windows-x64
 UninstallDisplayIcon={app}\releases\{#Version}\Afiocira.exe
 Compression=lzma2/fast
 SolidCompression=yes
@@ -61,7 +61,7 @@ begin
 end;
 function ApplicationId(Param: String): String;
 begin
- if TestMode then Result := 'Afiocira.PackageTest.2.0.0' else Result := 'Afiocira.LilyAvelis';
+ if TestMode then Result := 'Afiocira.PackageTest.{#Version}' else Result := 'Afiocira.LilyAvelis';
 end;
 procedure CheckVideoSetup;
 begin

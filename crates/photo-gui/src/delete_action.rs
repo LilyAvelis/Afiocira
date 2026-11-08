@@ -2,6 +2,7 @@
 use super::*;
 use photo_core::recycle::Target;
 pub(super) struct Dialog {
+    scope: photo_core::selection::SelectionScope,
     targets: Vec<Target>,
     order: Vec<PathBuf>,
     cursor: usize,
@@ -79,6 +80,7 @@ impl Workshop {
         let gallery = self.gallery.as_ref().ok_or("No open gallery")?;
         let immediate = gallery.view() == View::Photo || targets.len() == 1;
         let dialog = Dialog {
+            scope: gallery.selection_scope(),
             targets,
             order: gallery.photos().iter().map(|p| p.path.clone()).collect(),
             cursor: gallery
@@ -106,14 +108,14 @@ impl Workshop {
         let order = dialog.order.clone();
         let cursor = dialog.cursor;
         let revision = dialog.revision;
-        // Refuse a confirmation after leaving the captured folder. Same-folder
-        // cursor/mark changes remain permitted and never change these targets.
-        let folder = self.gallery.as_ref().ok_or("No open gallery")?.folder();
-        if targets
-            .iter()
-            .any(|t| t.path.parent().is_none_or(|p| !same_folder(p, folder)))
-        {
-            return Err("Delete confirmation belongs to another folder".into());
+        // Loaded descendants are members too. The captured collection identity
+        // rejects leaving/reopening even the same folder without retargeting.
+        let gallery = self.gallery.as_ref().ok_or("No open gallery")?;
+        if !dialog.scope.permits(
+            gallery.collection_id(),
+            targets.iter().map(|t| t.path.as_path()),
+        ) {
+            return Err("Delete confirmation belongs to another collection".into());
         }
         self.start_task(operations::TaskKind::Delete(targets))?;
         if let Some(origin) = &mut self.operation_origin {
