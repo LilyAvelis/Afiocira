@@ -6,6 +6,14 @@ use photo_core::actions::{ActionId, ActionInfo};
 /// so a new command cannot silently inherit an unrelated navigation arrow.
 pub(super) fn icon(action: ActionId) -> Lucide {
     match action {
+        ActionId::Metadata => Lucide::Tags,
+        ActionId::History => Lucide::Clock,
+        ActionId::Undo => Lucide::Undo2,
+        ActionId::Redo => Lucide::Redo2,
+        ActionId::CommitHistory => Lucide::Save,
+        ActionId::AdjustImage | ActionId::AdjustDetails | ActionId::AdjustVignette => {
+            Lucide::SlidersHorizontal
+        }
         ActionId::RotateLeft => Lucide::RotateCcw,
         ActionId::RotateRight => Lucide::RotateCw,
         ActionId::FlipHorizontal => Lucide::FlipHorizontal2,
@@ -13,7 +21,7 @@ pub(super) fn icon(action: ActionId) -> Lucide {
         ActionId::EnterAlbum => Lucide::FolderOpen,
         ActionId::CopyVideoFrame => Lucide::Copy,
         ActionId::SaveVideoFrame => Lucide::Image,
-        ActionId::Copy => Lucide::Copy,
+        ActionId::Copy | ActionId::CopyPath | ActionId::CopySelectedPath => Lucide::Copy,
         ActionId::Duplicate => Lucide::CopyPlus,
         ActionId::Paste => Lucide::ClipboardPaste,
         ActionId::Rename => Lucide::Pencil,
@@ -53,6 +61,127 @@ struct InlineShortcut {
     binding: Option<String>,
     error: Option<String>,
     replaceable: bool,
+    current_binding: String,
+    selected_button: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShortcutChoice {
+    Replace,
+    Retry,
+    Clear,
+    Cancel,
+}
+enum ShortcutInput {
+    Binding(String),
+    Choice(ShortcutChoice),
+}
+impl InlineShortcut {
+    fn assignment_failed(&mut self, binding: String, error: String, replaceable: bool) {
+        self.replaceable = replaceable;
+        self.binding = replaceable.then_some(binding);
+        self.error = Some(error);
+        self.selected_button = replaceable.then_some(0);
+    }
+    fn choices(&self) -> Vec<ShortcutChoice> {
+        let mut choices = Vec::new();
+        if self.replaceable {
+            choices.push(ShortcutChoice::Replace);
+        }
+        if self.binding.is_some() {
+            choices.push(ShortcutChoice::Retry);
+        }
+        if !self.current_binding.is_empty() {
+            choices.push(ShortcutChoice::Clear);
+        }
+        choices.push(ShortcutChoice::Cancel);
+        choices
+    }
+    fn input(&mut self, input: &mut egui::InputState) -> Option<ShortcutInput> {
+        let binding = match shortcuts::take_recorded_chord(input)? {
+            None => return Some(ShortcutInput::Choice(ShortcutChoice::Cancel)),
+            Some(binding) if binding.is_empty() => {
+                return Some(ShortcutInput::Choice(ShortcutChoice::Clear));
+            }
+            Some(binding) => binding,
+        };
+        let chord = shortcuts::parse(&binding).ok()?.into_iter().next()?;
+        let controls = self.binding.is_some() || self.selected_button.is_some();
+        let backwards = matches!(chord.logical_key, Key::ArrowLeft | Key::ArrowUp)
+            || (chord.logical_key == Key::Tab && chord.modifiers.shift);
+        let navigation =
+            (chord.logical_key == Key::Tab && !chord.modifiers.ctrl && !chord.modifiers.alt)
+                || (controls
+                    && chord.modifiers.is_none()
+                    && matches!(
+                        chord.logical_key,
+                        Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown
+                    ));
+        if navigation {
+            let count = self.choices().len();
+            self.selected_button = Some(match self.selected_button {
+                Some(index) if backwards => (index + count - 1) % count,
+                Some(index) => (index + 1) % count,
+                None if backwards => count - 1,
+                None => 0,
+            });
+            return None;
+        }
+        if controls && chord.logical_key == Key::Enter && chord.modifiers.is_none() {
+            return Some(ShortcutInput::Choice(
+                self.choices()[self.selected_button.unwrap_or(0)],
+            ));
+        }
+        self.binding
+            .is_none()
+            .then_some(ShortcutInput::Binding(binding))
+    }
+    fn render(&mut self, ui: &mut egui::Ui) -> Option<ShortcutChoice> {
+        ui.strong(format!("Клавиша · {}", self.label));
+        ui.weak(match self.context.as_str() {
+            "space" => "Просмотр файла",
+            "albums" => "Альбомы",
+            _ => "Галерея",
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Текущее сочетание:");
+            if self.current_binding.is_empty() {
+                ui.weak("не назначено");
+            } else {
+                crate::ui_style::keycap(ui, &self.current_binding);
+            }
+        });
+        if let Some(error) = &self.error {
+            ui.colored_label(Color32::LIGHT_RED, error);
+            if !self.replaceable {
+                ui.weak("Нажмите другое сочетание, чтобы повторить ввод.");
+            }
+        } else {
+            ui.label("Нажмите сочетание клавиш. Оно сохранится сразу.");
+        }
+        let mut picked = None;
+        ui.horizontal_wrapped(|ui| {
+            for (index, choice) in self.choices().into_iter().enumerate() {
+                let label = match choice {
+                    ShortcutChoice::Replace => "Заменить назначение",
+                    ShortcutChoice::Retry => "Другая клавиша",
+                    ShortcutChoice::Clear => "Снять назначение · Ctrl Backspace",
+                    ShortcutChoice::Cancel => "Отмена · Esc",
+                };
+                let response = ui.add(
+                    egui::Button::new(label)
+                        .selected(self.selected_button == Some(index))
+                        .wrap(),
+                );
+                if response.clicked() {
+                    picked = Some(choice);
+                }
+            }
+        });
+        ui.weak("Tab — к кнопкам · стрелки — выбор · Enter — подтвердить");
+        ui.separator();
+        picked
+    }
 }
 
 fn take_assignment_key(input: &mut egui::InputState) -> bool {
@@ -107,6 +236,8 @@ impl Workshop {
             binding: None,
             error: None,
             replaceable: false,
+            current_binding: action.shortcut,
+            selected_button: None,
         });
         self.palette.shortcut_release = true;
     }
@@ -130,19 +261,13 @@ impl Workshop {
             self.palette.shortcut_release = !released;
             return true;
         }
-        if let Some(capture) = self.palette.shortcut.as_ref() {
+        if let Some(capture) = self.palette.shortcut.as_mut() {
             let action = capture.action;
             let context = capture.context.clone();
-            let recording = capture.binding.is_none();
-            let captured = ctx.input_mut(shortcuts::take_recorded_chord);
+            let captured = ctx.input_mut(|input| capture.input(input));
             match captured {
-                Some(None) => {
-                    self.palette.shortcut = None;
-                    self.settings.shortcut_candidate = None;
-                    self.settings.error = None;
-                    self.palette.shortcut_release = true;
-                }
-                Some(Some(binding)) if recording => {
+                Some(ShortcutInput::Choice(choice)) => self.palette_shortcut_choice(choice),
+                Some(ShortcutInput::Binding(binding)) => {
                     self.apply_palette_shortcut(action, context, binding, false);
                 }
                 _ => {}
@@ -181,54 +306,60 @@ impl Workshop {
             }
             Err(error) => {
                 if let Some(capture) = &mut self.palette.shortcut {
-                    capture.binding = Some(binding);
-                    capture.error = Some(error);
-                    capture.replaceable = self.settings.shortcut_candidate.is_some();
+                    capture.assignment_failed(
+                        binding,
+                        error,
+                        self.settings.shortcut_candidate.is_some(),
+                    );
                 }
+                self.palette.shortcut_release = true;
             }
         }
     }
 
     fn palette_shortcut_editor(&mut self, ui: &mut egui::Ui) {
+        if let Some(choice) = self
+            .palette
+            .shortcut
+            .as_mut()
+            .and_then(|capture| capture.render(ui))
+        {
+            self.palette_shortcut_choice(choice);
+        }
+    }
+    fn palette_shortcut_choice(&mut self, choice: ShortcutChoice) {
         let Some(capture) = self.palette.shortcut.as_ref() else {
             return;
         };
         let action = capture.action;
         let context = capture.context.clone();
-        let binding = capture.binding.clone();
-        let replaceable = capture.replaceable;
-        ui.strong(format!("Клавиша · {}", capture.label));
-        ui.weak(match capture.context.as_str() {
-            "space" => "Просмотр файла",
-            "albums" => "Альбомы",
-            _ => "Галерея",
-        });
-        if let Some(error) = &capture.error {
-            ui.colored_label(Color32::LIGHT_RED, error);
-        } else {
-            ui.label("Нажмите сочетание клавиш. Оно сохранится сразу.");
-        }
-        ui.horizontal(|ui| {
-            if replaceable && ui.button("Заменить назначение").clicked() {
-                self.apply_palette_shortcut(action, context, binding.clone().unwrap(), true);
+        match choice {
+            ShortcutChoice::Replace if capture.replaceable => {
+                let binding = capture.binding.clone().unwrap_or_default();
+                self.apply_palette_shortcut(action, context, binding, true);
             }
-            if binding.is_some()
-                && ui.button("Другая клавиша").clicked()
-                && let Some(capture) = &mut self.palette.shortcut
-            {
-                capture.binding = None;
-                capture.error = None;
-                capture.replaceable = false;
+            ShortcutChoice::Clear => {
+                self.apply_palette_shortcut(action, context, String::new(), false)
+            }
+            ShortcutChoice::Retry => {
+                if let Some(capture) = &mut self.palette.shortcut {
+                    capture.binding = None;
+                    capture.error = None;
+                    capture.replaceable = false;
+                    capture.selected_button = None;
+                }
                 self.settings.shortcut_candidate = None;
+                self.settings.error = None;
+                self.palette.shortcut_release = true;
             }
-            if ui.button("Отмена · Esc").clicked() {
+            ShortcutChoice::Cancel => {
                 self.palette.shortcut = None;
                 self.settings.shortcut_candidate = None;
                 self.settings.error = None;
                 self.palette.shortcut_release = true;
             }
-        });
-        ui.separator();
+            _ => {}
+        }
     }
     pub(super) fn filtered_actions(&self) -> Vec<ActionInfo> {
         let words: Vec<_> = self
@@ -271,6 +402,8 @@ impl Workshop {
     }
     pub(super) fn actions_footer(&mut self, ui: &mut egui::Ui) {
         let mut toggle = false;
+        let mut picked = None;
+        let actions = self.available_actions();
         egui::Panel::bottom("actions-footer")
             .exact_size(46.0)
             .frame(
@@ -296,6 +429,23 @@ impl Workshop {
                     ui.label(egui::RichText::new(label).color(Color32::from_gray(180)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         toggle = crate::ui_style::actions_button(ui, self.palette.open).clicked();
+                        for (id, label) in [
+                            (ActionId::Metadata, "Metadata"),
+                            (ActionId::History, "History"),
+                        ] {
+                            if let Some(action) = actions.iter().find(|a| a.id == id) {
+                                let shortcut = action.shortcut.replace("Ctrl ", "Ctrl+");
+                                if ui
+                                    .add(egui::Button::image_and_text(
+                                        icon(id).size(15.0).image(),
+                                        format!("{label} · {shortcut}"),
+                                    ))
+                                    .clicked()
+                                {
+                                    picked = Some(id);
+                                }
+                            }
+                        }
                     });
                 });
             });
@@ -308,6 +458,11 @@ impl Workshop {
             if let Some(error) = self.execute(command).error {
                 self.message = error.message;
             }
+        }
+        if let Some(id) = picked
+            && let Some(error) = self.execute(Command::RunAction { id }).error
+        {
+            self.message = error.message;
         }
     }
     pub(super) fn actions_popup(&mut self, ctx: &egui::Context) {
@@ -506,6 +661,130 @@ impl Workshop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn editor(conflict: bool) -> InlineShortcut {
+        InlineShortcut { action: ActionId::Copy, context: "space".into(),
+            label: "Копировать текущий кадр с очень длинным названием".into(),
+            binding: conflict.then(|| "Ctrl H".into()),
+            error: conflict.then(|| "Сочетание «Ctrl+H» уже назначено команде «История» (просмотр файла). Замена снимет его с этой команды.".into()),
+            replaceable: conflict, current_binding: "Ctrl C".into(), selected_button: conflict.then_some(0) }
+    }
+    fn key(
+        editor: &mut InlineShortcut,
+        key: Key,
+        modifiers: egui::Modifiers,
+    ) -> Option<ShortcutInput> {
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput {
+            events: vec![egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }],
+            ..Default::default()
+        });
+        let result = ctx.input_mut(|i| editor.input(i));
+        assert!(!ctx.input(|i| {
+            i.events
+                .iter()
+                .any(|e| matches!(e, egui::Event::Key { .. }))
+        }));
+        ctx.end_pass().textures_delta.clear();
+        result
+    }
+    #[test]
+    fn conflict_buttons_support_arrows_enter_clear_and_escape_without_dispatch_leaks() {
+        let mut editor = editor(true);
+        assert!(key(&mut editor, Key::ArrowRight, egui::Modifiers::NONE).is_none());
+        assert!(matches!(
+            key(&mut editor, Key::Enter, egui::Modifiers::NONE),
+            Some(ShortcutInput::Choice(ShortcutChoice::Retry))
+        ));
+        key(&mut editor, Key::ArrowDown, egui::Modifiers::NONE);
+        assert!(matches!(
+            key(&mut editor, Key::Enter, egui::Modifiers::NONE),
+            Some(ShortcutInput::Choice(ShortcutChoice::Clear))
+        ));
+        key(&mut editor, Key::ArrowLeft, egui::Modifiers::NONE);
+        key(&mut editor, Key::ArrowUp, egui::Modifiers::NONE);
+        assert!(matches!(
+            key(&mut editor, Key::Enter, egui::Modifiers::NONE),
+            Some(ShortcutInput::Choice(ShortcutChoice::Replace))
+        ));
+        assert!(matches!(
+            key(&mut editor, Key::Backspace, egui::Modifiers::CTRL),
+            Some(ShortcutInput::Choice(ShortcutChoice::Clear))
+        ));
+        assert!(matches!(
+            key(&mut editor, Key::Escape, egui::Modifiers::NONE),
+            Some(ShortcutInput::Choice(ShortcutChoice::Cancel))
+        ));
+    }
+    #[test]
+    fn recording_keeps_arrows_bindable_until_tab_moves_to_buttons() {
+        let mut editor = editor(false);
+        assert!(matches!(
+            key(&mut editor, Key::ArrowLeft, egui::Modifiers::NONE),
+            Some(ShortcutInput::Binding(_))
+        ));
+        key(&mut editor, Key::Tab, egui::Modifiers::NONE);
+        assert_eq!(editor.selected_button, Some(0));
+        key(&mut editor, Key::ArrowRight, egui::Modifiers::NONE);
+        assert!(matches!(
+            key(&mut editor, Key::Enter, egui::Modifiers::NONE),
+            Some(ShortcutInput::Choice(ShortcutChoice::Cancel))
+        ));
+    }
+    #[test]
+    fn validation_failure_keeps_accepting_letters_and_modified_chords() {
+        let mut editor = editor(false);
+        editor.assignment_failed(
+            "Ctrl ControlLeft".into(),
+            "Invalid legacy modifier".into(),
+            false,
+        );
+        assert!(editor.binding.is_none() && editor.selected_button.is_none());
+        assert!(
+            matches!(key(&mut editor, Key::J, egui::Modifiers::NONE), Some(ShortcutInput::Binding(binding)) if binding == "J")
+        );
+        assert!(
+            matches!(key(&mut editor, Key::J, egui::Modifiers::CTRL), Some(ShortcutInput::Binding(binding)) if binding == "Ctrl J")
+        );
+    }
+    #[test]
+    fn shortcut_editor_wraps_at_all_widths_and_dpi() {
+        for width in [240.0, 420.0, 650.0] {
+            for ppp in [1.0, 1.5, 2.0] {
+                for conflict in [false, true] {
+                    let ctx = egui::Context::default();
+                    let mut editor = editor(conflict);
+                    let mut input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 900.0),
+                        )),
+                        ..Default::default()
+                    };
+                    input
+                        .viewports
+                        .get_mut(&egui::ViewportId::ROOT)
+                        .unwrap()
+                        .native_pixels_per_point = Some(ppp);
+                    let mut output = ctx.run_ui(input, |ui| {
+                        editor.render(ui);
+                        assert!(
+                            ui.min_rect().right() <= width + 1.0,
+                            "width={width}, dpi={ppp}, rect={:?}, available={:?}",
+                            ui.min_rect(),
+                            ui.max_rect()
+                        );
+                    });
+                    output.textures_delta.clear();
+                }
+            }
+        }
+    }
 
     #[test]
     fn inline_assignment_consumes_native_ctrl_shift_comma_before_settings() {

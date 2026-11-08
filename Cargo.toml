@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/photo-core", "crates/photo-cli", "crates/photo-gui", "crates/photo-launcher", "vendor/egui_tty"]
+members = ["crates/photo-core", "crates/photo-registry", "crates/photo-history", "crates/photo-cli", "crates/photo-gui", "crates/photo-launcher", "vendor/egui_tty"]
 resolver = "3"
 
 [patch.crates-io]

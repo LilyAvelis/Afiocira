@@ -19,9 +19,21 @@ Gallery, Albums and Space shortcut groups start collapsed; shortcut search expan
 matching groups. Yazi keybinding layers also have collapsible categories and search.
 In the Action Panel, select a rebindable command and press Ctrl+Shift+, to record
 its shortcut in place. The assignment uses the same context, persistence and
-conflict checks as Settings; Escape cancels recording.
+conflict checks as Settings; Escape cancels recording. The editor shows the
+current binding. Ctrl+Backspace removes it without removing the command;
+Delete remains bindable. Modifier-only events wait for a main key, so Ctrl+H
+records the chord rather than a physical left/right Ctrl key. Conflict messages
+identify the chord and its existing command. Use arrows or Tab/Shift+Tab to
+select conflict buttons and Enter to confirm. During initial recording, Tab
+first moves to buttons; otherwise arrow keys can themselves be recorded.
 
 Rotate left/right default to Q/E; horizontal and vertical flips start unbound.
+Ctrl+L copies the current folder path in Gallery or the current file path in
+Space. Ctrl+Shift+L copies the cursor file path in Gallery without opening it.
+These Actions are rebindable; Yazi retains its own Ctrl+L behavior.
+Settings → Afio → «Уведомления о копировании» controls the short path/raw-text
+copy confirmation. It defaults on, saves independently of other preferences,
+and can be changed through `set_copy_notifications {enabled}` in the local API.
 These actions overwrite the same file without changing its name or format,
 through a checked staging/rollback transaction. Selection and view stay in place.
 PNG and static WebP transforms preserve pixels; JPEG is re-encoded at quality 95.

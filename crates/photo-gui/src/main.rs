@@ -1,30 +1,42 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod actions;
+mod adjust_image;
+mod adjustment_preview;
+mod adjustments_panel;
 mod albums;
 mod clipboard;
 mod clipboard_input;
 mod convert_image;
+mod copy_feedback;
 mod decode;
 mod delete_action;
+mod detail_adjustments;
 mod dispatch;
 mod drop_input;
+mod embedded_metadata;
 mod everything;
 mod file_state;
 mod frame_capture;
 mod gallery_scale;
 mod gallery_view;
+mod generation_metadata;
+mod history_panel;
 mod image_actions;
 mod image_cache;
 mod input;
 mod ipc;
 mod layout;
 mod media_view;
+mod metadata;
+mod metadata_panel;
+mod metadata_ui;
 mod native_shortcuts;
 mod navigator;
 mod nested_view;
 mod operation_metrics;
 mod operations;
 mod palette;
+mod photo_metadata;
 mod rename_action;
 mod resize_image;
 mod scroll_navigation;
@@ -90,6 +102,11 @@ enum ActivePane {
     Gallery,
 }
 struct Workshop {
+    adjustment_commit_preview: Option<(u64, PathBuf, TextureHandle)>,
+    metadata_panel: metadata_panel::Panel,
+    history_panel: history_panel::State,
+    adjustments_panel: Option<adjustments_panel::Dialog>,
+    metadata: metadata::State,
     transform_animation: Option<transform_animation::Animation>,
     navigation: navigator::State,
     yazi_settings: yazi_settings::State,
@@ -145,6 +162,13 @@ struct Workshop {
     dirty_all: bool,
 }
 impl Workshop {
+    fn navigator_rendered(&self) -> bool {
+        self.show_yazi
+            && (!(self.metadata_panel.is_open()
+                || self.history_panel.open
+                || self.adjustments_panel.is_some())
+                || self.ctx.content_rect().width() >= 960.0)
+    }
     fn new(cc: &eframe::CreationContext<'_>, initial: &Path) -> Self {
         let ctx = &cc.egui_ctx;
         ui_style::install(ctx);
@@ -181,6 +205,11 @@ impl Workshop {
             Err(error) => (None, Some(format!("Live API unavailable: {error}"))),
         };
         let mut app = Self {
+            adjustment_commit_preview: None,
+            metadata_panel: metadata_panel::Panel::new(),
+            history_panel: history_panel::State::default(),
+            adjustments_panel: None,
+            metadata: metadata::State::default(),
             transform_animation: None,
             navigation: navigator::State::default(),
             yazi_settings: yazi_settings::State::default(),
@@ -260,8 +289,12 @@ impl eframe::App for Workshop {
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        copy_feedback::configure(&ctx, self.settings.copy_notifications);
         frame_capture::poll(&ctx);
         self.poll_operations(&ctx);
+        self.metadata.poll();
+        self.poll_metadata_panel();
+        self.poll_adjustments_preview();
         self.sync_video();
         self.poll_api();
         self.poll_navigator();
@@ -302,12 +335,19 @@ impl eframe::App for Workshop {
             ui.label(egui::RichText::new("Afio").strong().size(19.0));
             ui.separator();
             if ui
-                .add(egui::Button::new("Yazi").selected(self.show_yazi))
+                .add(egui::Button::new("Yazi").selected(self.navigator_rendered()))
                 .clicked()
             {
-                self.execute(Command::SetNavigatorVisible {
-                    visible: !self.show_yazi,
-                });
+                if self.show_yazi && !self.navigator_rendered() {
+                    if self.metadata_panel.close() {
+                        self.history_panel.open = false;
+                        self.history_panel.preview = None;
+                    }
+                } else {
+                    self.execute(Command::SetNavigatorVisible {
+                        visible: !self.show_yazi,
+                    });
+                }
             }
             let input = ui.add(
                 egui::TextEdit::singleline(&mut self.folder_input)
@@ -354,6 +394,9 @@ impl eframe::App for Workshop {
             && self.image_dialog.is_none()
             && self.rename_dialog.is_none()
             && self.delete_dialog.is_none()
+            && self.adjustments_panel.is_none()
+            && !self.metadata_panel.is_open()
+            && !self.history_panel.open
             && consume_plain_tab(&ctx)
         {
             match self.active_pane {
@@ -371,7 +414,7 @@ impl eframe::App for Workshop {
         }
         let mut restart_yazi = false;
         let mut terminal_has_focus = false;
-        if self.show_yazi
+        if self.navigator_rendered()
             && let Some(yazi) = &mut self.yazi
         {
             egui::Panel::left("yazi-navigator")
@@ -422,7 +465,7 @@ impl eframe::App for Workshop {
                         restart_yazi = true;
                     }
                 });
-        } else if self.show_yazi
+        } else if self.navigator_rendered()
             && let Some(error) = &self.yazi_error
         {
             ui.label(format!("Yazi unavailable: {error}"));
@@ -446,6 +489,8 @@ impl eframe::App for Workshop {
             && self.rename_dialog.is_none()
             && self.delete_dialog.is_none()
             && !ctx.memory(|memory| memory.focused().is_some())
+            && self.adjustments_panel.is_none()
+            && !self.history_panel.open
         {
             let layout = grid_layout(
                 ui.available_width(),
@@ -454,6 +499,9 @@ impl eframe::App for Workshop {
             );
             self.key_input(&ctx, layout.columns);
         }
+        self.render_metadata_panel(ui);
+        self.render_history_panel(ui);
+        self.render_adjustments_panel(ui);
         let gallery_heading = if self.active_pane == ActivePane::Gallery {
             "GALLERY · стрелки — выбор · Ctrl+K — Actions"
         } else {
@@ -483,6 +531,7 @@ impl eframe::App for Workshop {
         self.poll_mark_sync();
         self.poll_visual_probe();
         self.settings_window(&ctx);
+        copy_feedback::render(&ctx);
     }
 }
 fn pasted_path(text: &str) -> PathBuf {

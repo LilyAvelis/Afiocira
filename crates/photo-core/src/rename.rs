@@ -44,6 +44,18 @@ pub struct SourceVersion {
     size: u64,
     modified: u128,
 }
+impl SourceVersion {
+    /// Exact observable fingerprint, not a logical image ID or content hash.
+    /// Binary integers avoid truncating unsigned Windows identities in SQLite.
+    pub fn fingerprint(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(40);
+        bytes.extend_from_slice(&self.identity.0.to_le_bytes());
+        bytes.extend_from_slice(&self.identity.1.to_le_bytes());
+        bytes.extend_from_slice(&self.size.to_le_bytes());
+        bytes.extend_from_slice(&self.modified.to_le_bytes());
+        bytes
+    }
+}
 fn changed() -> io::Error {
     io::Error::other("Source file changed since it was selected")
 }

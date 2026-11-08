@@ -44,17 +44,17 @@
 
         <h2>Overview of licenses:</h2>
         <ul class="licenses-overview">
-            <li><a href="#MIT">MIT License</a> (174)</li>
-            <li><a href="#Apache-2.0">Apache License 2.0</a> (13)</li>
+            <li><a href="#MIT">MIT License</a> (191)</li>
+            <li><a href="#Apache-2.0">Apache License 2.0</a> (15)</li>
+            <li><a href="#BSD-2-Clause">BSD 2-Clause &quot;Simplified&quot; License</a> (6)</li>
             <li><a href="#0BSD">BSD Zero Clause License</a> (2)</li>
             <li><a href="#BSD-3-Clause">BSD 3-Clause &quot;New&quot; or &quot;Revised&quot; License</a> (2)</li>
             <li><a href="#BSL-1.0">Boost Software License 1.0</a> (2)</li>
             <li><a href="#ISC">ISC License</a> (2)</li>
-            <li><a href="#BSD-2-Clause">BSD 2-Clause &quot;Simplified&quot; License</a> (1)</li>
+            <li><a href="#Unicode-3.0">Unicode License v3</a> (2)</li>
             <li><a href="#CC0-1.0">Creative Commons Zero v1.0 Universal</a> (1)</li>
             <li><a href="#OFL-1.1">SIL Open Font License 1.1</a> (1)</li>
             <li><a href="#Ubuntu-font-1.0">Ubuntu Font Licence v1.0</a> (1)</li>
-            <li><a href="#Unicode-3.0">Unicode License v3</a> (1)</li>
             <li><a href="#Zlib">zlib License</a> (1)</li>
         </ul>
 
@@ -1155,6 +1155,8 @@ PERFORMANCE OF THIS SOFTWARE.
                 <h3 id="Apache-2.0">Apache License 2.0</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
+                    <li><a href=" https://github.com/BLAKE3-team/BLAKE3 ">blake3 1.8.7</a></li>
+                    <li><a href=" https://github.com/cesarb/constant_time_eq ">constant_time_eq 0.4.2</a></li>
                     <li><a href=" https://github.com/brendanzab/gl-rs/ ">gl_generator 0.14.0</a></li>
                     <li><a href=" https://github.com/kotauskas/interprocess ">interprocess 2.4.7</a></li>
                     <li><a href=" https://github.com/brendanzab/gl-rs/ ">khronos_api 3.1.0</a></li>
@@ -1239,6 +1241,194 @@ limitations under the License.
                 <h3 id="BSD-2-Clause">BSD 2-Clause &quot;Simplified&quot; License</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
+                    <li><a href=" https://github.com/kamadak/exif-rs ">kamadak-exif 0.6.1</a></li>
+                </ul>
+                <pre class="license-text">//
+// Copyright (c) 2016 KAMADA Ken&#x27;ichi.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+// 1. Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+// 2. Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS &#x60;&#x60;AS IS&#x27;&#x27; AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+// ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+// OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+// HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+// LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+// OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+// SUCH DAMAGE.
+//
+
+// Macros for testing.
+
+macro_rules! assert_ok {
+    ($expr:expr, $value:expr) &#x3D;&gt; (
+        match $expr {
+            Ok(v) &#x3D;&gt; assert_eq!(v, $value),
+            r &#x3D;&gt; panic!(&quot;assertion failed: unexpected {:?}&quot;, r),
+        }
+    )
+}
+
+macro_rules! assert_pat {
+    ($expr:expr, $pat:pat) &#x3D;&gt; (
+        match $expr {
+            $pat &#x3D;&gt; {},
+            ref r &#x3D;&gt; panic!(&quot;assertion failed: unexpected {:?}&quot;, r),
+        }
+    )
+}
+
+macro_rules! assert_err_pat {
+    ($expr:expr, $variant:pat) &#x3D;&gt; (
+        match $expr {
+            Err($variant) &#x3D;&gt; {},
+            r &#x3D;&gt; panic!(&quot;assertion failed: unexpected {:?}&quot;, r),
+        }
+    )
+}
+
+// This macro is intended to be used with std::io::Error, but other
+// types with kind() will also work.
+macro_rules! assert_err_kind {
+    ($expr:expr, $kind:expr) &#x3D;&gt; (
+        match $expr {
+            Err(e) &#x3D;&gt; assert_eq!(e.kind(), $kind),
+            r &#x3D;&gt; panic!(&quot;assertion failed: unexpected {:?}&quot;, r),
+        }
+    )
+}
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="BSD-2-Clause">BSD 2-Clause &quot;Simplified&quot; License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
+                    <li><a href=" https://github.com/kamadak/exif-rs ">kamadak-exif 0.6.1</a></li>
+                </ul>
+                <pre class="license-text">//
+// Copyright (c) 2016 KAMADA Ken&#x27;ichi.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+// 1. Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+// 2. Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS &#x60;&#x60;AS IS&#x27;&#x27; AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+// ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+// OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+// HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+// LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+// OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+// SUCH DAMAGE.
+//
+
+extern crate exif;
+
+use std::env;
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
+
+fn main() {
+    for path in env::args_os().skip(1).map(PathBuf::from) {
+        if let Err(e) &#x3D; dump_file(&amp;path) {
+            println!(&quot;{}: {}&quot;, path.display(), e);
+        }
+    }
+}
+
+fn dump_file(path: &amp;Path) -&gt; Result&lt;(), exif::Error&gt; {
+    let file &#x3D; File::open(path)?;
+
+    // To parse strictly:
+    // let exif &#x3D; exif::Reader::new()
+    //     .read_from_container(&amp;mut BufReader::new(&amp;file))?;
+
+    // To parse with continue-on-error mode:
+    let exif &#x3D; exif::Reader::new()
+        .continue_on_error(true)
+        .read_from_container(&amp;mut BufReader::new(&amp;file))
+        .or_else(|e| e.distill_partial_result(|errors| {
+            eprintln!(&quot;{}: {} warning(s)&quot;, path.display(), errors.len());
+            errors.iter().for_each(|e| eprintln!(&quot;  {}&quot;, e));
+        }))?;
+
+    println!(&quot;{}&quot;, path.display());
+    for f in exif.fields() {
+        println!(&quot;  {}/{}: {}&quot;,
+                 f.ifd_num.index(), f.tag,
+                 f.display_value().with_unit(&amp;exif));
+        println!(&quot;      {:?}&quot;, f.value);
+    }
+    Ok(())
+}
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="BSD-2-Clause">BSD 2-Clause &quot;Simplified&quot; License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
+                    <li><a href=" https://github.com/kamadak/exif-rs ">kamadak-exif 0.6.1</a></li>
+                </ul>
+                <pre class="license-text">//
+// Copyright (c) 2016 KAMADA Ken&#x27;ichi.
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions
+// are met:
+// 1. Redistributions of source code must retain the above copyright
+//    notice, this list of conditions and the following disclaimer.
+// 2. Redistributions in binary form must reproduce the above copyright
+//    notice, this list of conditions and the following disclaimer in the
+//    documentation and/or other materials provided with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS &#x60;&#x60;AS IS&#x27;&#x27; AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+// ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+// OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+// HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+// LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+// OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+// SUCH DAMAGE.
+//
+
+use std::mem;
+
+// This library assumes that usize is not smaller than u32.
+#[test]
+fn size_of_usize() {
+    assert!(mem::size_of::&lt;usize&gt;() &gt;&#x3D; mem::size_of::&lt;u32&gt;());
+}
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="BSD-2-Clause">BSD 2-Clause &quot;Simplified&quot; License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
                     <li><a href=" https://github.com/droundy/arrayref ">arrayref 0.3.9</a></li>
                 </ul>
                 <pre class="license-text">Copyright (c) 2015 David Roundy &lt;roundyd@physics.oregonstate.edu&gt;
@@ -1267,6 +1457,68 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="BSD-2-Clause">BSD 2-Clause &quot;Simplified&quot; License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
+                    <li><a href=" https://github.com/kamadak/exif-rs ">kamadak-exif 0.6.1</a></li>
+                </ul>
+                <pre class="license-text">Copyright (c) 2016-2023 KAMADA Ken&#x27;ichi.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS &#x60;&#x60;AS IS&#x27;&#x27; AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGE.
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="BSD-2-Clause">BSD 2-Clause &quot;Simplified&quot; License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
+                    <li><a href=" https://github.com/kamadak/mutate_once-rs ">mutate_once 0.1.2</a></li>
+                </ul>
+                <pre class="license-text">Copyright (c) 2019 KAMADA Ken&#x27;ichi.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS &#x60;&#x60;AS IS&#x27;&#x27; AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGE.
 </pre>
             </li>
             <li class="license">
@@ -1542,7 +1794,10 @@ DEALINGS IN THE SOFTWARE.
                 <h3 id="MIT">MIT License</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
+                    <li><a href=" https://github.com/rust-lang/cc-rs ">cc 1.11.1</a></li>
                     <li><a href=" https://github.com/rust-lang/cfg-if ">cfg-if 1.0.5</a></li>
+                    <li><a href=" https://github.com/rust-lang/cc-rs ">find-msvc-tools 0.1.15</a></li>
+                    <li><a href=" https://github.com/rust-lang/pkg-config-rs ">pkg-config 0.3.34</a></li>
                 </ul>
                 <pre class="license-text">Copyright (c) 2014 Alex Crichton
 
@@ -1639,6 +1894,34 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="MIT">MIT License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
+                    <li><a href=" https://github.com/rusqlite/rusqlite ">libsqlite3-sys 0.39.1</a></li>
+                    <li><a href=" https://github.com/rusqlite/rusqlite ">rusqlite 0.41.1</a></li>
+                </ul>
+                <pre class="license-text">Copyright (c) 2014 The rusqlite developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 </pre>
             </li>
             <li class="license">
@@ -1766,6 +2049,40 @@ THE SOFTWARE.
                 <h3 id="MIT">MIT License</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
+                    <li><a href=" https://github.com/Stebalien/tempfile ">tempfile 3.27.0</a></li>
+                </ul>
+                <pre class="license-text">Copyright (c) 2015 Steven Allen
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the &quot;Software&quot;), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="MIT">MIT License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
+                    <li><a href=" https://github.com/unicode-rs/unicode-normalization ">unicode-normalization 0.1.26</a></li>
                     <li><a href=" https://github.com/unicode-rs/unicode-segmentation ">unicode-segmentation 1.13.3</a></li>
                 </ul>
                 <pre class="license-text">Copyright (c) 2015 The Rust Project Developers
@@ -1802,6 +2119,33 @@ DEALINGS IN THE SOFTWARE.
                     <li><a href=" http://github.com/tailhook/quick-error ">quick-error 2.0.1</a></li>
                 </ul>
                 <pre class="license-text">Copyright (c) 2015 The quick-error Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="MIT">MIT License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
+                    <li><a href=" https://github.com/sfackler/rust-fallible-iterator ">fallible-iterator 0.3.0</a></li>
+                </ul>
+                <pre class="license-text">Copyright (c) 2015 The rust-openssl-verify Developers
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the &quot;Software&quot;), to deal
@@ -1955,6 +2299,33 @@ DEALINGS IN THE SOFTWARE.
                 <h3 id="MIT">MIT License</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
+                    <li><a href=" https://github.com/sfackler/fallible-streaming-iterator ">fallible-streaming-iterator 0.1.9</a></li>
+                </ul>
+                <pre class="license-text">Copyright (c) 2016 The fallible-streaming-iterator Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="MIT">MIT License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
                     <li><a href=" https://github.com/tmiasko/shell-words ">shell-words 1.1.1</a></li>
                 </ul>
                 <pre class="license-text">Copyright (c) 2016 Tomasz Miąsko
@@ -2081,6 +2452,40 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="MIT">MIT License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
+                    <li><a href=" https://github.com/mcgoo/vcpkg-rs ">vcpkg 0.2.15</a></li>
+                </ul>
+                <pre class="license-text">Copyright (c) 2017 Jim McGrath
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the &quot;Software&quot;), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
 </pre>
             </li>
             <li class="license">
@@ -2283,6 +2688,40 @@ THE SOFTWARE.
                 <h3 id="MIT">MIT License</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
+                    <li><a href=" https://github.com/rust-random/getrandom ">getrandom 0.4.3</a></li>
+                </ul>
+                <pre class="license-text">Copyright (c) 2018-2026 The rust-random Project Developers
+Copyright (c) 2014 The Rust Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the &quot;Software&quot;), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="MIT">MIT License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
                     <li><a href=" https://github.com/googlefonts/fontations ">font-types 0.12.7</a></li>
                     <li><a href=" https://github.com/googlefonts/fontations ">read-fonts 0.41.0</a></li>
                     <li><a href=" https://github.com/googlefonts/fontations ">skrifa 0.44.0</a></li>
@@ -2443,6 +2882,39 @@ SOFTWARE.
                     <li><a href=" https://github.com/LukasKalbertodt/litrs ">litrs 1.0.1</a></li>
                 </ul>
                 <pre class="license-text">Copyright (c) 2020 Project Developers
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the &quot;Software&quot;), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="MIT">MIT License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
+                    <li><a href=" https://github.com/RustCrypto/utils ">cpufeatures 0.3.1</a></li>
+                </ul>
+                <pre class="license-text">Copyright (c) 2020-2026 The RustCrypto Project Developers
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -3145,7 +3617,9 @@ SOFTWARE.
                     <li><a href=" https://crates.io/crates/photo-cli ">photo-cli 2.5.0</a></li>
                     <li><a href=" https://crates.io/crates/photo-core ">photo-core 2.5.0</a></li>
                     <li><a href=" https://crates.io/crates/photo-gui ">photo-gui 2.5.0</a></li>
+                    <li><a href=" https://crates.io/crates/photo-history ">photo-history 3.0.0</a></li>
                     <li><a href=" https://crates.io/crates/photo-launcher ">photo-launcher 2.5.0</a></li>
+                    <li><a href=" https://crates.io/crates/photo-registry ">photo-registry 3.0.0</a></li>
                     <li><a href=" https://github.com/AccessKit/accesskit ">accesskit 0.24.1</a></li>
                     <li><a href=" https://github.com/rust-windowing/winit ">dpi 0.1.2</a></li>
                     <li><a href=" https://github.com/emilk/egui ">ecolor 0.36.2</a></li>
@@ -3468,6 +3942,7 @@ SOFTWARE.
                 <ul class="license-used-by">
                     <li><a href=" https://github.com/oyvindln/adler2 ">adler2 2.0.1</a></li>
                     <li><a href=" https://github.com/dtolnay/anyhow ">anyhow 1.0.104</a></li>
+                    <li><a href=" https://github.com/smol-rs/fastrand ">fastrand 2.5.0</a></li>
                     <li><a href=" https://github.com/Juici/int-enum-rs ">int-enum 1.3.0</a></li>
                     <li><a href=" https://github.com/dtolnay/itoa ">itoa 1.0.18</a></li>
                     <li><a href=" https://github.com/rust-lang-nursery/lazy-static.rs ">lazy_static 1.5.1</a></li>
@@ -3599,6 +4074,19 @@ SOFTWARE.
                 <h3 id="MIT">MIT License</h3>
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
+                    <li><a href=" https://github.com/Lokathor/tinyvec ">tinyvec 1.13.3</a></li>
+                </ul>
+                <pre class="license-text">Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the &quot;Software&quot;), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="MIT">MIT License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
                     <li><a href=" https://github.com/tokio-rs/tracing ">tracing-core 0.1.36</a></li>
                 </ul>
                 <pre class="license-text">The MIT License (MIT)
@@ -3722,6 +4210,35 @@ THE SOFTWARE.
                 <pre class="license-text">The MIT License (MIT)
 
 Copyright (c) 2015 Carl Lerche + nix-rust Authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+</pre>
+            </li>
+            <li class="license">
+                <h3 id="MIT">MIT License</h3>
+                <h4>Used by:</h4>
+                <ul class="license-used-by">
+                    <li><a href=" https://github.com/comex/rust-shlex ">shlex 2.0.1</a></li>
+                </ul>
+                <pre class="license-text">The MIT License (MIT)
+
+Copyright (c) 2015 Nicholas Allegra (comex).
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the &quot;Software&quot;), to deal
@@ -4268,6 +4785,7 @@ DEALINGS IN THE FONT SOFTWARE.
                 <h4>Used by:</h4>
                 <ul class="license-used-by">
                     <li><a href=" https://github.com/dtolnay/unicode-ident ">unicode-ident 1.0.27</a></li>
+                    <li><a href=" https://github.com/unicode-rs/unicode-normalization ">unicode-normalization 0.1.26</a></li>
                 </ul>
                 <pre class="license-text">UNICODE LICENSE V3
 

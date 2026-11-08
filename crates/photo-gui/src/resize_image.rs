@@ -96,7 +96,7 @@ fn requested_size(w: u32, h: u32, o: &ResizeOptions) -> Result<(u32, u32), Strin
     Ok(size)
 }
 /// Parse container chunks rather than searching pixel payloads for animation tags.
-fn reject_animation(bytes: &[u8], format: ImageFormat) -> Result<(), String> {
+pub(crate) fn reject_animation(bytes: &[u8], format: ImageFormat) -> Result<(), String> {
     let (mut offset, png) = match format {
         ImageFormat::Png => (8usize, true),
         ImageFormat::WebP => (12, false),
@@ -127,7 +127,7 @@ fn reject_animation(bytes: &[u8], format: ImageFormat) -> Result<(), String> {
     }
     Ok(())
 }
-fn encode(
+pub(crate) fn encode(
     image: &DynamicImage,
     format: OutputFormat,
     quality: u8,
@@ -310,9 +310,19 @@ pub fn transform_in_place(
     })
 }
 
-fn transform_metadata(bytes: &[u8], format: ImageFormat) -> Result<Vec<u8>, String> {
+pub(crate) fn transform_metadata(bytes: &[u8], format: ImageFormat) -> Result<Vec<u8>, String> {
+    collect_transform_metadata(bytes, format, false)
+}
+pub(crate) fn adjustment_metadata(bytes: &[u8], format: ImageFormat) -> Result<Vec<u8>, String> {
+    collect_transform_metadata(bytes, format, true)
+}
+fn collect_transform_metadata(
+    bytes: &[u8],
+    format: ImageFormat,
+    photometric: bool,
+) -> Result<Vec<u8>, String> {
     let unsupported = || {
-        "Transform refused: this XMP, unknown or dimension-dependent metadata cannot be preserved safely; original unchanged".to_owned()
+        "Встроенный блок метаданных пока не поддерживается для этой операции. Его можно посмотреть в Ctrl+G; исходник не изменён.".to_owned()
     };
     let mut saved = Vec::new();
     match format {
@@ -331,6 +341,7 @@ fn transform_metadata(bytes: &[u8], format: ImageFormat) -> Result<Vec<u8>, Stri
                     b"iCCP" | b"sRGB" | b"gAMA" | b"cHRM" | b"tEXt" | b"zTXt" => {
                         saved.extend_from_slice(&bytes[p..end])
                     }
+                    b"iTXt" if photometric => saved.extend_from_slice(&bytes[p..end]),
                     _ => return Err(unsupported()),
                 }
                 p = end;
@@ -351,6 +362,25 @@ fn transform_metadata(bytes: &[u8], format: ImageFormat) -> Result<Vec<u8>, Stri
                     .checked_add(n + 2)
                     .filter(|v| n >= 2 && *v <= bytes.len())
                     .ok_or("Invalid JPEG segment")?;
+                if marker == 0xe1
+                    && bytes[p + 4..end].starts_with(crate::embedded_metadata::JPEG_XMP_HEADER)
+                {
+                    if !photometric {
+                        return Err("Этот файл содержит XMP. Чтение в Ctrl+G и коррекции поддерживаются; поворот/отражение с обновлением геометрических XMP-полей пока не реализованы. Исходник не изменён.".into());
+                    }
+                    let xml = &bytes[p + 4 + crate::embedded_metadata::JPEG_XMP_HEADER.len()..end];
+                    crate::embedded_metadata::parse_packet(xml).map_err(|e| {
+                        format!(
+                            "Не удалось проверить XMP перед сохранением: {e}. Исходник не изменён."
+                        )
+                    })?;
+                    saved.extend_from_slice(&bytes[p..end]);
+                    p = end;
+                    continue;
+                }
+                if marker == 0xeb {
+                    return Err("JPEG содержит APP11/JUMBF — возможные сведения о происхождении C2PA. Они доступны для просмотра в Ctrl+G; сохранение правки с такими блоками пока не поддерживается. Исходник не изменён.".into());
+                }
                 if marker == 0xe0 && bytes[p + 4..end].starts_with(b"JFIF\0") {
                     let payload = &bytes[p + 4..end];
                     if payload.len() < 14 || payload[12] != 0 || payload[13] != 0 {
@@ -364,7 +394,10 @@ fn transform_metadata(bytes: &[u8], format: ImageFormat) -> Result<Vec<u8>, Stri
                 {
                     saved.extend_from_slice(&bytes[p..end]);
                 } else if (0xe0..=0xef).contains(&marker) {
-                    return Err(unsupported());
+                    return Err(format!(
+                        "JPEG содержит неподдерживаемый для записи блок APP{}. Данные можно посмотреть в Ctrl+G; исходник не изменён.",
+                        marker - 0xe0
+                    ));
                 }
                 if (0xc0..=0xcf).contains(&marker)
                     && ![0xc4, 0xc8, 0xcc].contains(&marker)
@@ -401,7 +434,11 @@ fn transform_metadata(bytes: &[u8], format: ImageFormat) -> Result<Vec<u8>, Stri
 /// Patch standard TIFF orientation/dimensions in place, retaining all other
 /// EXIF bytes and MakerNotes at their original offsets. Detach obsolete thumbnail
 /// IFD (its bytes remain in the APP1 payload); malformed/unsupported TIFF rejects.
-fn normalize_jpeg_exif(metadata: &mut [u8], width: u32, height: u32) -> Result<(), String> {
+pub(crate) fn normalize_jpeg_exif(
+    metadata: &mut [u8],
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
     fn u16_at(b: &[u8], p: usize, le: bool) -> Result<u16, String> {
         let a: [u8; 2] = b.get(p..p + 2).ok_or("Truncated EXIF")?.try_into().unwrap();
         Ok(if le {

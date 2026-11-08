@@ -86,6 +86,15 @@ The historical [2.0 release record](docs/release-2.0.md) remains available.
 
 ## Technical notes
 
+The 3.0 development branch adds explicitly sparse SQLite metadata, a Ctrl+G
+side panel, Ctrl+H session history with undo/redo and explicit forward truncation,
+and separate light/color, detail and vignette tools. Ctrl+G also reads supported
+embedded XMP/EXIF/IPTC/color information and ComfyUI workflow data without
+registering the image. Ctrl+L copies the folder/file path; Ctrl+Shift+L copies
+the Gallery cursor file path. See [session editing](docs/session-editing.md) and
+[Metadata Registry](docs/metadata-registry.md) for commands, verification and
+current limits. This development stage is separate from the 2.5 release scope.
+
 [Architecture](docs/architecture.md) · [Yazi](docs/yazi-navigation.md) · [Video](docs/video.md) · [Actions](docs/actions.md) · [Clipboard/rename/drop](docs/import-and-rename.md) · [Delete](docs/delete.md) · [Latency](docs/delete-performance.md) · [Everything](docs/everything.md) · [Albums and image actions](docs/nested-and-image-actions.md) · [Terminal colors](docs/terminal-colors.md).
 
 All GUI, keyboard, CLI and native API commands share one dispatcher. Release validation includes unit/native tests, doctests, strict Clippy and isolated native API scenarios; current evidence is recorded in [the 2.5 release record](docs/release-2.5.md). Those checks do not certify every codec, filesystem or machine.

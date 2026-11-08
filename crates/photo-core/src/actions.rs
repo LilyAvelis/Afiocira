@@ -3,6 +3,14 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ActionId {
+    Metadata,
+    History,
+    Undo,
+    Redo,
+    CommitHistory,
+    AdjustImage,
+    AdjustDetails,
+    AdjustVignette,
     RotateLeft,
     RotateRight,
     FlipHorizontal,
@@ -15,6 +23,8 @@ pub enum ActionId {
     Delete,
     Duplicate,
     Copy,
+    CopyPath,
+    CopySelectedPath,
     Paste,
     Rename,
     Open,
@@ -57,6 +67,31 @@ pub fn available(context: &Context) -> Vec<ActionInfo> {
     };
     add(Search, "Поиск Everything", "Навигация", "Ctrl Shift K");
     add(Settings, "Настройки…", "Приложение", "Ctrl ,");
+    if context.has_gallery {
+        if !context.space || context.targets > 0 {
+            add(
+                CopyPath,
+                if context.space {
+                    "Копировать путь файла"
+                } else {
+                    "Копировать путь папки"
+                },
+                "Буфер обмена",
+                "Ctrl L",
+            );
+        }
+        if !context.space && context.targets > 0 {
+            add(
+                CopySelectedPath,
+                "Копировать путь текущего файла",
+                "Буфер обмена",
+                "Ctrl Shift L",
+            );
+        }
+    }
+    if context.has_gallery && context.targets > 0 && !context.video {
+        add(Metadata, "Метаданные…", "Изображение", "Ctrl G");
+    }
     if context.targets > 0 && !context.busy {
         let copy_label = if context.targets > 1 {
             format!("Копировать файлы ({})", context.targets)
@@ -84,6 +119,18 @@ pub fn available(context: &Context) -> Vec<ActionInfo> {
         add(FlipVertical, "Отразить по вертикали", "Изображение", "");
         add(ResizeImage, "Размер и вес…", "Изображение", "");
         add(ConvertImage, "Конвертировать формат…", "Изображение", "");
+        add(AdjustImage, "Свет и цвет…", "Редактирование", "");
+        add(AdjustDetails, "Детали…", "Редактирование", "");
+        add(AdjustVignette, "Виньетка…", "Редактирование", "");
+        add(History, "История…", "Изображение", "Ctrl H");
+        add(Undo, "Предыдущая версия", "История", "Ctrl Z");
+        add(Redo, "Следующая версия", "История", "Ctrl Shift Z");
+        add(
+            CommitHistory,
+            "Закрепить текущую версию",
+            "История",
+            "Ctrl S",
+        );
     }
     if context.space && context.video && context.targets > 0 && !context.busy {
         add(CopyVideoFrame, "Копировать текущий кадр", "Видео", "");
@@ -129,6 +176,66 @@ pub fn available(context: &Context) -> Vec<ActionInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn copy_paths_follow_gallery_and_space_contexts() {
+        for has_gallery in [false, true] {
+            for space in [false, true] {
+                for targets in [0, 1, 3] {
+                    let context = Context {
+                        album_overview: false,
+                        space,
+                        targets,
+                        video: true,
+                        busy: true,
+                        has_gallery,
+                        marked: false,
+                    };
+                    let actions = available(&context);
+                    let find = |id| actions.iter().find(|action| action.id == id);
+                    assert_eq!(
+                        find(ActionId::CopyPath).is_some(),
+                        has_gallery && (!space || targets > 0)
+                    );
+                    assert_eq!(
+                        find(ActionId::CopySelectedPath).is_some(),
+                        has_gallery && !space && targets > 0
+                    );
+                    if let Some(action) = find(ActionId::CopyPath) {
+                        assert_eq!(action.shortcut, "Ctrl L");
+                    }
+                    if let Some(action) = find(ActionId::CopySelectedPath) {
+                        assert_eq!(action.shortcut, "Ctrl Shift L");
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn editing_tools_have_independent_discoverable_commands() {
+        let mut context = Context {
+            album_overview: false,
+            space: true,
+            targets: 1,
+            video: false,
+            busy: false,
+            has_gallery: true,
+            marked: false,
+        };
+        let tools = [
+            ActionId::AdjustImage,
+            ActionId::AdjustDetails,
+            ActionId::AdjustVignette,
+        ];
+        for id in tools {
+            assert!(
+                available(&context)
+                    .iter()
+                    .any(|a| a.id == id && a.group == "Редактирование")
+            );
+        }
+        context.space = false;
+        assert!(available(&context).iter().all(|a| !tools.contains(&a.id)));
+    }
     #[test]
     fn settings_remain_discoverable_without_gallery_and_while_busy() {
         let actions = available(&Context {

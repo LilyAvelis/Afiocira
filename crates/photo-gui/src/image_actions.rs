@@ -13,6 +13,38 @@ pub(super) struct Dialog {
     focus_order: Vec<egui::Id>,
 }
 impl Workshop {
+    pub(super) fn image_tool_action(&self) -> Option<photo_core::actions::ActionId> {
+        self.image_dialog.as_ref().map(|d| {
+            if d.snapshot.convert {
+                photo_core::actions::ActionId::ConvertImage
+            } else {
+                photo_core::actions::ActionId::ResizeImage
+            }
+        })
+    }
+    pub(super) fn apply_current_image(&mut self) -> Result<(), String> {
+        let d = self
+            .image_dialog
+            .as_ref()
+            .ok_or("Сначала откройте обработку изображения")?;
+        let parse = |s: &str| -> Result<Option<u32>, String> {
+            if s.trim().is_empty() {
+                Ok(None)
+            } else {
+                s.trim()
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|n| *n > 0)
+                    .map(Some)
+                    .ok_or_else(|| "Введите целые положительные размеры и вес".into())
+            }
+        };
+        let mut options = d.options.clone();
+        options.width = parse(&d.width)?;
+        options.height = parse(&d.height)?;
+        options.target_bytes = parse(&d.weight)?.map(|v| u64::from(v) * 1024);
+        self.submit_image(options)
+    }
     pub(super) fn begin_image(&mut self, convert: bool) -> Result<(), String> {
         if self.image_dialog.is_some()
             || self.rename_dialog.is_some()

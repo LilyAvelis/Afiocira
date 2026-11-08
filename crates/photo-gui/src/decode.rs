@@ -150,12 +150,14 @@ pub fn spawn_worker(
     });
 }
 
-fn decode(path: &Path, max_side: u32) -> Result<ColorImage, String> {
+pub(crate) fn decode(path: &Path, max_side: u32) -> Result<ColorImage, String> {
     if photo_core::is_video_path(path) {
         return video_thumbnail(path, max_side);
     }
     let mut decoder = image::ImageReader::open(path)
         .map_err(|error| format!("Cannot read {}: {error}", path.display()))?
+        .with_guessed_format()
+        .map_err(|error| format!("Cannot identify {}: {error}", path.display()))?
         .into_decoder()
         .map_err(|error| format!("Cannot decode {}: {error}", path.display()))?;
     let mut limits = image::Limits::default();

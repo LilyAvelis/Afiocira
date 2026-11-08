@@ -23,7 +23,37 @@ pub enum AppViewport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum Command {
+    ShowMetadata,
+    CloseMetadata,
+    CancelMetadata,
+    SubmitMetadata {
+        metadata: crate::metadata::Metadata,
+    },
+    DiscardMetadata,
+    ShowHistory,
+    CloseHistory,
+    PreviewHistory {
+        index: usize,
+    },
+    UndoHistory,
+    RedoHistory,
+    CommitHistory,
+    ShowAdjustments,
+    ApplyAdjustments,
+    PreviewAdjustments {
+        options: crate::adjustments::AdjustmentOptions,
+    },
+    SubmitAdjustments {
+        options: crate::adjustments::AdjustmentOptions,
+    },
+    CancelAdjustments,
     Status,
+    Metadata {
+        request: crate::metadata::MetadataRequest,
+    },
+    MetadataStatus {
+        request_id: u64,
+    },
     ShowSettings,
     SelectSettings {
         section: String,
@@ -42,6 +72,9 @@ pub enum Command {
         scale: Option<f32>,
     },
     SetGalleryAutoSize {
+        enabled: bool,
+    },
+    SetCopyNotifications {
         enabled: bool,
     },
     ConfigureYazi {
@@ -348,6 +381,17 @@ pub struct SearchState {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata_panel: Option<crate::metadata::MetadataPanelState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<crate::history::HistoryPanelState>,
+    #[serde(default)]
+    pub adjustments_open: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adjustments_preview: Option<crate::adjustments::PreviewState>,
+    /// Additive protocol-v3 extension; absent for unrelated commands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<crate::metadata::MetadataJob>,
     #[serde(default)]
     pub settings: Option<SettingsState>,
     #[serde(default)]
@@ -394,7 +438,13 @@ pub struct SettingsState {
     pub gallery_scale: Option<f32>,
     #[serde(default)]
     pub gallery_auto_size: bool,
+    #[serde(default = "copy_notifications_default")]
+    pub copy_notifications: bool,
 }
+fn copy_notifications_default() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorCode {
@@ -437,6 +487,11 @@ pub struct NavigatorRuntimeState {
 impl Response {
     pub fn ok(gallery: Option<&Gallery>) -> Self {
         Self {
+            metadata: None,
+            metadata_panel: None,
+            history: None,
+            adjustments_open: false,
+            adjustments_preview: None,
             settings: None,
             search: None,
             nested: None,
@@ -458,6 +513,11 @@ impl Response {
     }
     pub fn error(code: ErrorCode, message: impl Into<String>, gallery: Option<&Gallery>) -> Self {
         Self {
+            metadata: None,
+            metadata_panel: None,
+            history: None,
+            adjustments_open: false,
+            adjustments_preview: None,
             settings: None,
             search: None,
             nested: None,
@@ -479,5 +539,29 @@ impl Response {
                 message: message.into(),
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod copy_notification_tests {
+    use super::*;
+    #[test]
+    fn command_and_settings_expose_copy_notifications_with_enabled_legacy_default() {
+        let command: Command =
+            serde_json::from_str(r#"{"command":"set_copy_notifications","enabled":false}"#)
+                .unwrap();
+        assert!(matches!(
+            command,
+            Command::SetCopyNotifications { enabled: false }
+        ));
+        let legacy =
+            serde_json::json!({"open":false,"section":"afio","yazi_text_size":12.0,"error":null});
+        let mut settings: SettingsState = serde_json::from_value(legacy).unwrap();
+        assert!(settings.copy_notifications);
+        settings.copy_notifications = false;
+        assert_eq!(
+            serde_json::to_value(settings).unwrap()["copy_notifications"],
+            false
+        );
     }
 }

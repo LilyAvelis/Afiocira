@@ -60,6 +60,18 @@ fn main() -> ExitCode {
 fn control(args: &[OsString]) -> ExitCode {
     let command = match args {
         [action] if action == "status" => Command::Status,
+        [action, path] if action == "metadata" => Command::Metadata {
+            request: photo_core::metadata::MetadataRequest::Inspect { path: path.into() },
+        },
+        [action, id] if action == "metadata-status" => {
+            let Some(request_id) = id.to_str().and_then(|s| s.parse().ok()) else {
+                return failure(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Expected metadata request ID",
+                ));
+            };
+            Command::MetadataStatus { request_id }
+        }
         [action] if action == "settings" => Command::ShowSettings,
         [action] if action == "close-settings" => Command::CloseSettings,
         [action] if action == "enter-album" => Command::EnterAlbum,
@@ -258,7 +270,12 @@ fn run_live_command(command: &Command) -> ExitCode {
     match send_to_gui(command) {
         Ok(response) => {
             println!("{}", serde_json::to_string_pretty(&response).unwrap());
-            if response.error.is_some() {
+            if response.error.is_some()
+                || response
+                    .metadata
+                    .as_ref()
+                    .is_some_and(|job| job.error.is_some())
+            {
                 ExitCode::FAILURE
             } else {
                 ExitCode::SUCCESS
@@ -428,7 +445,7 @@ fn parse_os_values<const N: usize>(values: [&OsString; N]) -> Option<[f32; N]> {
 
 fn print_usage() {
     eprintln!(
-        "Usage: photo-cli list <folder> | browse <folder> | open <file> | ctl <status|list-order|open PATH|select INDEX|select-path PATH|extend-selection INDEX|toggle-selection INDEX|mark [PATH ...]|order [PATH ...]|open-selected|next|previous|back|refresh|show-navigator|hide-navigator|focus-gallery|focus-navigator|zoom FACTOR X Y VIEW_W VIEW_H FIT_W FIT_H|pan DX DY VIEW_W VIEW_H FIT_W FIT_H|reset-zoom|commands|actions|close-actions|search-actions QUERY|action ID|copy|duplicate|paste|delete|confirm-delete|cancel-delete|begin-rename|rename NEW_NAME|cancel-rename|import PATH...|drop-open PATH...|video-play|video-pause|video-seek SECONDS|video-volume 0..100> | ctl-json < JSON_COMMAND"
+        "Usage: photo-cli list <folder> | browse <folder> | open <file> | ctl <status|metadata PATH|metadata-status REQUEST_ID|list-order|open PATH|select INDEX|select-path PATH|extend-selection INDEX|toggle-selection INDEX|mark [PATH ...]|order [PATH ...]|open-selected|next|previous|back|refresh|show-navigator|hide-navigator|focus-gallery|focus-navigator|zoom FACTOR X Y VIEW_W VIEW_H FIT_W FIT_H|pan DX DY VIEW_W VIEW_H FIT_W FIT_H|reset-zoom|commands|actions|close-actions|search-actions QUERY|action ID|copy|duplicate|paste|delete|confirm-delete|cancel-delete|begin-rename|rename NEW_NAME|cancel-rename|import PATH...|drop-open PATH...|video-play|video-pause|video-seek SECONDS|video-volume 0..100> | ctl-json < JSON_COMMAND"
     );
 }
 

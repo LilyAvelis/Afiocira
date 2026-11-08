@@ -12,6 +12,19 @@ fn action_key(action: ActionId) -> String {
         .unwrap()
         .to_owned()
 }
+fn modifier_key(key: Key) -> bool {
+    matches!(
+        key,
+        Key::ControlLeft
+            | Key::ControlRight
+            | Key::AltLeft
+            | Key::AltRight
+            | Key::ShiftLeft
+            | Key::ShiftRight
+            | Key::SuperLeft
+            | Key::SuperRight
+    )
+}
 fn defaults(context: &str) -> Vec<ActionInfo> {
     let mut c = Context {
         album_overview: context == "albums",
@@ -96,6 +109,11 @@ pub(super) fn parse(text: &str) -> Result<Vec<egui::KeyboardShortcut>, String> {
                         key = Some(
                             Key::from_name(name).ok_or_else(|| format!("Unknown key: {part}"))?,
                         );
+                        if key.is_some_and(modifier_key) {
+                            return Err(
+                                "Модификатору нужна основная клавиша, например Ctrl+H".into()
+                            );
+                        }
                     }
                 }
             }
@@ -150,8 +168,15 @@ pub(super) fn take_recorded_chord(input: &mut egui::InputState) -> Option<Option
             repeat: false,
             modifiers,
             ..
-        } => Some(if *key == Key::Escape && modifiers.is_none() {
+        } if !modifier_key(*key) => Some(if *key == Key::Escape && modifiers.is_none() {
             None
+        } else if *key == Key::Backspace
+            && modifiers.ctrl
+            && !modifiers.alt
+            && !modifiers.shift
+            && !modifiers.mac_cmd
+        {
+            Some(String::new())
         } else {
             Some(normalize(&[egui::KeyboardShortcut::new(*modifiers, *key)]))
         }),
@@ -172,6 +197,40 @@ pub(super) fn discard_recording_events(input: &mut egui::InputState) {
                 | egui::Event::Paste(_)
         )
     });
+}
+
+/// A slider's focus permits the editor toggle; numeric text entry owns its key.
+pub(super) fn take_editor_action(
+    ctx: &egui::Context,
+    actions: Vec<ActionInfo>,
+) -> Option<ActionId> {
+    if ctx.text_edit_focused() {
+        return None;
+    }
+    ctx.input_mut(|input| take_action(input, actions, false, false))
+}
+
+/// Claim the editor's default submit before buttons see Enter. Giving up
+/// numeric text focus lets DragValue commit its last value in this UI pass.
+pub(super) fn take_editor_enter(ctx: &egui::Context, armed: bool) -> bool {
+    let fresh = armed
+        && ctx.input(|i| {
+            i.events.iter().any(|e| matches!(e,
+        egui::Event::Key { key: Key::Enter, pressed: true, repeat: false, modifiers, .. }
+        if modifiers.is_none()
+    ))
+        });
+    if fresh {
+        ctx.input_mut(|i| {
+            i.consume_key(egui::Modifiers::NONE, Key::Enter);
+        });
+        ctx.memory_mut(|m| {
+            if let Some(id) = m.focused() {
+                m.surrender_focus(id);
+            }
+        });
+    }
+    fresh
 }
 
 pub(super) fn take_action(
@@ -269,12 +328,21 @@ fn plan_change(
         .iter()
         .filter(|e| e.context == context && e.action != action)
     {
-        let other_chords = parse(other.binding.as_deref().unwrap_or(""))?;
+        // Legacy recorders could persist a physical modifier as the main key.
+        // Such a binding is inactive in take_action; it must not prevent every
+        // unrelated assignment (including removing or repairing that binding).
+        let other_chords = parse(other.binding.as_deref().unwrap_or("")).unwrap_or_default();
         if chords.iter().any(|c| other_chords.contains(c)) {
             if !replace || !other.rebindable {
                 return Err(format!(
-                    "{} conflicts with {} in {context}",
-                    own.label, other.label
+                    "Сочетание «{}» уже назначено команде «{}» ({}). Замена снимет его с этой команды.",
+                    own.binding.as_deref().unwrap_or("").replace(' ', "+"),
+                    other.label,
+                    match context {
+                        "space" => "просмотр файла",
+                        "albums" => "альбомы",
+                        _ => "галерея",
+                    }
                 ));
             }
             next[context][action_key(other.action)] = Value::Null;
@@ -312,7 +380,7 @@ impl Workshop {
                 result
                     .as_ref()
                     .err()
-                    .is_some_and(|error| error.contains(" conflicts with "))
+                    .is_some_and(|error| error.starts_with("Сочетание «"))
                     && plan_change(
                         &self.settings.shortcuts,
                         action,
@@ -353,40 +421,11 @@ impl Workshop {
         let Some((action, context)) = self.settings.recording.clone() else {
             return;
         };
-        let captured = ctx.input(|i| {
-            i.events.iter().find_map(|event| {
-                if let egui::Event::Key {
-                    key,
-                    pressed: true,
-                    repeat: false,
-                    modifiers,
-                    ..
-                } = event
-                {
-                    Some((*key, *modifiers))
-                } else {
-                    None
-                }
-            })
-        });
-        if let Some((key, modifiers)) = captured {
-            ctx.input_mut(|i| {
-                i.events.retain(|e| {
-                    !matches!(
-                        e,
-                        egui::Event::Key { .. }
-                            | egui::Event::Text(_)
-                            | egui::Event::Copy
-                            | egui::Event::Cut
-                            | egui::Event::Paste(_)
-                    )
-                })
-            });
+        if let Some(captured) = ctx.input_mut(take_recorded_chord) {
             self.settings.recording = None;
-            if key == Key::Escape && modifiers.is_none() {
+            let Some(binding) = captured else {
                 return;
-            }
-            let binding = normalize(&[egui::KeyboardShortcut::new(modifiers, key)]);
+            };
             self.execute(Command::SetShortcut {
                 action,
                 context,
@@ -404,6 +443,18 @@ impl Workshop {
         ui.weak("Shortcuts · команды остаются в Actions даже без клавиши");
         ui.add_space(ui_tokens::LG);
         settings::card(ui, |ui| {
+            settings::row(
+                ui,
+                "Уведомления о копировании",
+                "Краткое подтверждение после копирования пути или текста.",
+                310.0,
+                |ui| {
+                    let mut enabled = self.settings.copy_notifications;
+                    if ui.checkbox(&mut enabled, "Включено").changed() {
+                        self.execute(Command::SetCopyNotifications { enabled });
+                    }
+                },
+            );
             settings::row(
                 ui,
                 "Подстраивать карточки под окно",
@@ -595,6 +646,143 @@ impl Workshop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_modifier_assignment_does_not_poison_unrelated_save_clear_or_repair() {
+        let original = json!({"space": {
+            "adjust_image": "G", "copy_video_frame": "Y", "flip_horizontal": "F",
+            "flip_vertical": "R", "rename": "Alt AltRight", "save_video_frame": "H"
+        }});
+        for binding in [Some("J"), Some("Ctrl J"), Some("")] {
+            let next = plan_change(
+                &original,
+                ActionId::AdjustDetails,
+                "space",
+                binding,
+                false,
+                false,
+            )
+            .unwrap();
+            assert_eq!(
+                next["space"]["rename"], "Alt AltRight",
+                "Unrelated preferences must be retained"
+            );
+            assert_eq!(
+                effective(&next, "space", ActionId::AdjustDetails, ""),
+                binding.unwrap()
+            );
+        }
+        let cleared =
+            plan_change(&original, ActionId::Rename, "space", Some(""), false, false).unwrap();
+        assert_eq!(cleared["space"]["rename"], Value::Null);
+        let repaired = plan_change(
+            &original,
+            ActionId::Rename,
+            "space",
+            Some("Alt J"),
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(repaired["space"]["rename"], "Alt J");
+        let conflict = plan_change(
+            &original,
+            ActionId::AdjustDetails,
+            "space",
+            Some("H"),
+            false,
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            conflict.contains("Сохранить текущий кадр PNG"),
+            "{conflict}"
+        );
+        assert!(
+            plan_change(
+                &original,
+                ActionId::AdjustDetails,
+                "space",
+                Some("Alt AltRight"),
+                false,
+                false
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn physical_modifiers_wait_for_the_main_key_in_both_frame_orders() {
+        for (physical, modifiers) in [
+            (
+                Key::ControlLeft,
+                egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+            ),
+            (Key::ControlRight, egui::Modifiers::CTRL),
+            (Key::AltLeft, egui::Modifiers::ALT),
+            (Key::AltRight, egui::Modifiers::ALT),
+            (Key::ShiftLeft, egui::Modifiers::SHIFT),
+            (Key::ShiftRight, egui::Modifiers::SHIFT),
+        ] {
+            let ctx = egui::Context::default();
+            let event = |key| egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed: true,
+                repeat: false,
+                modifiers,
+            };
+            ctx.begin_pass(egui::RawInput {
+                events: vec![event(physical)],
+                ..Default::default()
+            });
+            assert_eq!(ctx.input_mut(take_recorded_chord), None);
+            ctx.end_pass().textures_delta.clear();
+            ctx.begin_pass(egui::RawInput {
+                events: vec![event(Key::H)],
+                ..Default::default()
+            });
+            let captured = ctx.input_mut(take_recorded_chord).unwrap().unwrap();
+            assert_eq!(parse(&captured).unwrap()[0].logical_key, Key::H);
+            assert!(!captured.contains("Left") && !captured.contains("Right"));
+            ctx.end_pass().textures_delta.clear();
+            let ctx = egui::Context::default();
+            ctx.begin_pass(egui::RawInput {
+                events: vec![event(physical), event(Key::H)],
+                ..Default::default()
+            });
+            assert_eq!(ctx.input_mut(take_recorded_chord), Some(Some(captured)));
+            ctx.end_pass().textures_delta.clear();
+        }
+        for invalid in [
+            "Ctrl ControlLeft",
+            "Alt AltRight",
+            "ShiftLeft",
+            "SuperRight",
+        ] {
+            assert!(parse(invalid).is_err());
+        }
+    }
+    #[test]
+    fn clearing_creates_an_explicit_empty_override_and_conflict_names_owner_and_chord() {
+        let empty = json!({});
+        let error = plan_change(
+            &empty,
+            ActionId::Copy,
+            "space",
+            Some("Ctrl H"),
+            false,
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("Ctrl+H")
+                && error.contains("История")
+                && error.contains("просмотр файла"),
+            "{error}"
+        );
+        let cleared = plan_change(&empty, ActionId::Copy, "space", Some(""), false, false).unwrap();
+        assert_eq!(cleared["space"]["copy"], Value::Null);
+        assert_eq!(effective(&cleared, "space", ActionId::Copy, "Ctrl C"), "");
+    }
 
     #[test]
     fn recording_consumes_text_native_copy_and_key_before_command_dispatch() {
@@ -711,6 +899,95 @@ mod tests {
             run(Key::Q, egui::Modifiers::NONE, vec![], &json!({}), true),
             None
         );
+    }
+    #[test]
+    fn editor_toggle_uses_remapping_ignores_repeat_and_respects_text_input() {
+        for (text_focus, repeat, expected) in [
+            (false, false, Some(ActionId::AdjustDetails)),
+            (false, true, None),
+            (true, false, None),
+        ] {
+            let ctx = egui::Context::default();
+            let settings = plan_change(
+                &json!({}),
+                ActionId::AdjustDetails,
+                "space",
+                Some("G"),
+                false,
+                false,
+            )
+            .unwrap();
+            let mut actions: Vec<_> = defaults("space")
+                .into_iter()
+                .filter(|a| a.id == ActionId::AdjustDetails)
+                .collect();
+            for action in &mut actions {
+                action.shortcut = effective(&settings, "space", action.id, &action.shortcut);
+            }
+            ctx.begin_pass(egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: Key::G,
+                    physical_key: Some(Key::G),
+                    pressed: true,
+                    repeat,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            });
+            let focus = egui::Id::new("editor-control");
+            ctx.memory_mut(|m| m.request_focus(focus));
+            if text_focus {
+                egui::text_edit::TextEditState::default().store(&ctx, focus);
+            }
+            if repeat {
+                // InputState derives repeat from held keys, rather than trusting
+                // a backend's repeat flag on its first key event.
+                ctx.input_mut(|i| {
+                    for event in &mut i.events {
+                        if let egui::Event::Key { repeat, .. } = event {
+                            *repeat = true;
+                        }
+                    }
+                });
+            }
+            assert_eq!(
+                take_editor_action(&ctx, actions),
+                expected,
+                "text={text_focus}, repeat={repeat}"
+            );
+            ctx.end_pass().textures_delta.clear();
+        }
+        let catalogue = catalogue(&json!({}));
+        assert!(
+            catalogue
+                .iter()
+                .any(|a| a.action == ActionId::AdjustVignette
+                    && a.context == "space"
+                    && a.rebindable)
+        );
+    }
+    #[test]
+    fn editor_enter_is_armed_claimed_once_and_releases_numeric_focus() {
+        let ctx = egui::Context::default();
+        ctx.begin_pass(egui::RawInput {
+            events: vec![egui::Event::Key {
+                key: Key::Enter,
+                physical_key: Some(Key::Enter),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        });
+        let id = egui::Id::new("numeric-input");
+        ctx.memory_mut(|m| m.request_focus(id));
+        egui::text_edit::TextEditState::default().store(&ctx, id);
+        assert!(!take_editor_enter(&ctx, false));
+        assert!(ctx.text_edit_focused());
+        assert!(take_editor_enter(&ctx, true));
+        assert!(!ctx.text_edit_focused());
+        assert!(!take_editor_enter(&ctx, true));
+        ctx.end_pass().textures_delta.clear();
     }
     #[test]
     fn overrides_are_optional_contextual_and_conflicts_need_explicit_replacement() {
