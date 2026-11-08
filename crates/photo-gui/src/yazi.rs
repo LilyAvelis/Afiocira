@@ -1726,6 +1726,31 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(20));
             }
         }
+        fn ready_for_spot(pane: &mut YaziPane, photo: &Path) -> NavigatorSnapshot {
+            let deadline = Instant::now() + Duration::from_secs(8);
+            loop {
+                let snapshot = read(pane);
+                // Yazi's Spot::go ignores the key while the hovered file's MIME
+                // is unresolved. A reveal acknowledgement proves the cursor,
+                // but does not await this independent native fetcher.
+                if snapshot.hovered.as_deref() == Some(photo)
+                    && snapshot.metadata["layer"]
+                        .as_str()
+                        .is_some_and(|layer| layer.eq_ignore_ascii_case("mgr"))
+                    && snapshot.metadata["fixture_mime"]
+                        .as_str()
+                        .is_some_and(|mime| !mime.is_empty())
+                {
+                    return snapshot;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "Native file is not ready for Shift+Tab: cursor={:?}, metadata={:?}",
+                    snapshot.hovered,
+                    snapshot.metadata
+                );
+            }
+        }
         let mut fingerprints = Vec::new();
         for mode in [
             YaziThemeMode::Dark,
@@ -1736,6 +1761,20 @@ mod tests {
                 theme_mode: mode,
                 ..Default::default()
             })
+            .unwrap();
+            // Observe MIME through the same fresh, acknowledged snapshot used
+            // by the test. This field exists only in this private fixture copy;
+            // the production bridge and its state contract stay unchanged.
+            let fixture_sync = SYNC_PLUGIN.replacen(
+                "light = rt.term.light,",
+                "fixture_mime = hovered and hovered:mime() or \"\", light = rt.term.light,",
+                1,
+            );
+            assert_ne!(fixture_sync, SYNC_PLUGIN, "snapshot probe anchor changed");
+            fs::write(
+                prepared.config.join("plugins/workshop-sync.yazi/main.lua"),
+                fixture_sync,
+            )
             .unwrap();
             for (name, color, border) in [
                 ("fixture-dark", "#123456", "D"),
@@ -1784,9 +1823,12 @@ mod tests {
             fingerprints.push(theme);
             pane.apply_gallery_selection(&photo, &[], false, &[])
                 .unwrap();
-            read(&mut pane);
             for bytes in [b"\x1b[Z".as_slice(), b"\x1b[9;2u".as_slice()] {
-                eprintln!("Native Shift+Tab mode={mode:?} bytes={bytes:?}");
+                let ready = ready_for_spot(&mut pane, &photo);
+                eprintln!(
+                    "Native Shift+Tab mode={mode:?} bytes={bytes:?} mime={}",
+                    ready.metadata["fixture_mime"]
+                );
                 pane.tty.write(bytes).unwrap();
                 let opened = layer(&mut pane, "spot");
                 assert_eq!(opened.hovered.as_ref(), Some(&photo));

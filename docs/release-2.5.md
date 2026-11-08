@@ -31,7 +31,7 @@ Native API suites cover Settings, Yazi candidate validation/rollback, real Quick
 2. Build the locked release workspace with static CRT and source-path remapping, using the Windows workflow configuration and target/distribution.
 3. Stage with scripts/stage-windows-release.ps1. Verify pinned downloads, third-party notices, source provenance and every staged manifest hash.
 4. Compile scripts/Afiocira.iss with Inno Setup and create the complete portable ZIP. Generate SHA256SUMS.txt for the installer and ZIP; retain PACKAGE-MANIFEST.json and the exact source commit.
-5. Validate the staged and installed launchers in isolated local configuration, record results, then publish the approved public source/tag and assets at v2.5.0. The manual/PR workflow creates a candidate; it does not publish automatically.
+5. Validate the staged and installed launchers in isolated local configuration and record results. The [Windows pipeline](ci-cd.md) checks ordinary commits, builds candidates on manual request and publishes verified stable tags. The 2.5 pipeline also includes offline guard tests and deterministic native test readiness checks.
 
 The installer is unsigned and installs per user. Open With registration does not change defaults. Portable users must extract the complete folder. Yazi, the ES helper, font, runtime installer and notices accompany the package; Everything itself is optional and installed separately. **libmpv and FFmpeg binaries are not bundled:** optional installer video setup or portable Enable-Video.cmd downloads pinned, checksummed upstream distributions on the user's machine and requires Internet access. Downloads can be retried with the helper.
 

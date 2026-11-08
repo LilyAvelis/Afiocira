@@ -3,3 +3,4 @@
 **/.git-seed/
 **/__pycache__/
 *.pyc
+/.ci-cache/

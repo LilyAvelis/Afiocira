@@ -80,6 +80,10 @@ For development, `scripts/update-working.ps1` updates the permanent Afiocira des
 
 ## Release
 
+Windows checks, dependency caches and tagged publication are automated. Ordinary
+commits run checks; a matching version tag builds and publishes verified Windows
+packages. See [CI/CD and release procedure](docs/ci-cd.md).
+
 The source targets **2.5.0**. See [release notes and validation](docs/release-2.5.md)
 and [Settings](docs/settings.md) for complete scope and application guards.
 The historical [2.0 release record](docs/release-2.0.md) remains available.

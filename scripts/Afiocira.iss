@@ -1,5 +1,9 @@
-#define Version "2.5.0"
-#define Stage "..\target\package-2.5.0"
+#ifndef Version
+  #define Version "2.5.0"
+#endif
+#ifndef Stage
+  #define Stage "..\target\package-" + Version
+#endif
 [Setup]
 AppId={code:ApplicationId}
 AppName=Afiocira

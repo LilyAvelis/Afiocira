@@ -1,58 +1,185 @@
-name: Windows package validation
+name: Windows CI and release
+
 on:
   push:
     branches: [main]
+    tags: ['v[0-9]*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      package:
+        description: Build installer and portable candidate (does not publish)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.ci-cache/zig-global-cache
+
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
-  windows-x64:
+  check:
+    name: Format, Clippy and tests
     runs-on: windows-2025
-    permissions:
-      contents: read
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - name: Install build tools
-        shell: pwsh
-        run: |
-          choco install zig --version=0.15.2 --yes --no-progress
-          choco install innosetup --version=6.7.1 --yes --no-progress
-          rustup toolchain install 1.95.0 --profile minimal --component rustfmt,clippy
-          rustup default 1.95.0
-      - name: Build and stage
-        shell: pwsh
-        run: |
-          $sep = [char]31
-          $env:CARGO_ENCODED_RUSTFLAGS = '-C' + $sep + 'target-feature=+crt-static' + $sep + "--remap-path-prefix=$env:USERPROFILE=AFIOCIRA_BUILD" + $sep + "--remap-path-prefix=$env:GITHUB_WORKSPACE=AFIOCIRA_SOURCE"
-          cargo build --locked --release --workspace --target-dir target/distribution
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ./scripts/stage-windows-release.ps1
-          $iscc = Get-ChildItem 'C:\Program Files (x86)\Inno Setup*\ISCC.exe','C:\Program Files\Inno Setup*\ISCC.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $iscc) { throw 'Inno Setup compiler not found' }
-          & $iscc.FullName scripts/Afiocira.iss
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Compress-Archive -Path target/package-2.5.0/* -DestinationPath target/release-assets/Afiocira-2.5.0-Windows-x64.zip
-          Get-ChildItem target/release-assets/Afiocira-2.5.0-* -File | ForEach-Object {
-            '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
-          } | Set-Content target/release-assets/SHA256SUMS.txt -Encoding ascii
-      - name: Check and test
-        shell: pwsh
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Restore native dependencies and Zig
+        id: native
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .ci-cache/tools
+            .ci-cache/release-dependencies
+            .ci-cache/everything-runtime
+            .ci-cache/zig-global-cache
+          key: native-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: native-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-
+      - name: Prepare pinned toolchain
+        id: tools
+        run: ./scripts/setup-ci-tools.ps1
+      - name: Restore Rust dependency artifacts
+        id: rust
+        uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          shared-key: check-v2-${{ steps.tools.outputs.environment-key }}
+          cache-bin: false
+          cache-on-failure: true
+          cache-workspace-crates: false
+      - name: Format
         run: |
           cargo fmt --all -- --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Offline CI and release guard tests
+        run: ./scripts/tests/test-ci.ps1
+      - name: Native test fixtures and private configuration
+        run: |
+          ./scripts/setup-native-tests.ps1
+          $private = Join-Path $env:RUNNER_TEMP 'afio-tests'
+          foreach ($name in @('APPDATA', 'LOCALAPPDATA', 'YAZI_CONFIG_HOME', 'AFIO_SETTINGS_HOME')) {
+            $directory = Join-Path $private $name
+            New-Item -ItemType Directory -Force $directory | Out-Null
+            "$name=$directory" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          }
+      - name: Build console bootstrap and compile tests
+        run: |
+          . ./scripts/ci-common.ps1
+          Invoke-CargoBuild -Arguments @('build', '--locked', '-p', 'photo-cli')
+          Invoke-CargoBuild -Arguments @('build', '--locked', '--workspace', '--tests')
+      - name: Clippy
+        run: |
           cargo clippy --locked --workspace --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:APPDATA = "$env:RUNNER_TEMP\afio-config"
-          New-Item -ItemType Directory -Force $env:APPDATA | Out-Null
-          $env:PATH = "$(Resolve-Path target/package-2.5.0/yazi);$env:PATH"
-          New-Item -ItemType Directory -Force target/debug/deps/fonts | Out-Null
-          Copy-Item target/package-2.5.0/fonts/* target/debug/deps/fonts
-          New-Item -ItemType Directory -Force target/debug/deps/yazi | Out-Null
-          Copy-Item target/package-2.5.0/yazi/* target/debug/deps/yazi
-          cargo build --locked -p photo-cli
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Tests
+        run: |
           cargo test --locked --workspace
-      - uses: actions/upload-artifact@v4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Cache report
+        if: always()
+        run: |
+          @"
+          ## Windows checks
+          - Native dependency cache hit: $env:NATIVE_HIT
+          - Rust dependency cache hit: $env:RUST_HIT
+          - Workspace crates are compiled and tests are executed on every run.
+          - Packaging runs only for tags or an explicit candidate request.
+          "@ | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+        env:
+          NATIVE_HIT: ${{ steps.native.outputs.cache-hit }}
+          RUST_HIT: ${{ steps.rust.outputs.cache-hit }}
+
+  package:
+    name: Windows packages
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.package)
+    runs-on: windows-2025
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          name: Afiocira-2.5.0-Windows-x64
+          persist-credentials: false
+      - name: Restore native dependencies and Zig
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .ci-cache/tools
+            .ci-cache/release-dependencies
+            .ci-cache/everything-runtime
+            .ci-cache/zig-global-cache
+          key: native-package-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            native-package-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-
+            native-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-${{ hashFiles('Cargo.lock') }}
+            native-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-
+      - name: Prepare release toolchain
+        id: tools
+        run: ./scripts/setup-ci-tools.ps1 -Installer
+      - name: Set static CRT and remapped paths
+        run: |
+          $sep = [char]31
+          $flags = '-C' + $sep + 'target-feature=+crt-static' + $sep + "--remap-path-prefix=$env:USERPROFILE=AFIOCIRA_BUILD" + $sep + "--remap-path-prefix=$env:GITHUB_WORKSPACE=AFIOCIRA_SOURCE"
+          "CARGO_ENCODED_RUSTFLAGS=$flags" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Restore release dependency artifacts
+        uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
+        with:
+          shared-key: package-static-v2-${{ steps.tools.outputs.environment-key }}
+          workspaces: . -> target/distribution
+          cache-bin: false
+          cache-on-failure: true
+          cache-workspace-crates: false
+      - name: Read and validate version
+        id: version
+        run: |
+          . ./scripts/release-version.ps1
+          $version = Get-ReleaseVersion
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw 'Tag and Cargo package versions differ.'
+          }
+          "version=$version" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - name: Build and verify installer and portable ZIP
+        run: ./scripts/build-release.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Afiocira-${{ steps.version.outputs.version }}-Windows-x64
           path: target/release-assets/*
           if-no-files-found: error
+          retention-days: 14
+          # Permit retrying this run's package job without an artifact-name conflict.
+          overwrite: true
+
+  publish:
+    name: Publish tagged release
+    needs: package
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-2025
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: Afiocira-${{ needs.package.outputs.version }}-Windows-x64
+          path: target/release-assets
+      - name: Verify and publish
+        run: ./scripts/publish-release.ps1 -Version $env:RELEASE_VERSION -AssetsDirectory target/release-assets -NotesFile "docs/releases/v$env:RELEASE_VERSION.md"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.package.outputs.version }}
