@@ -120,8 +120,11 @@ jobs:
             .ci-cache/release-dependencies
             .ci-cache/everything-runtime
             .ci-cache/zig-global-cache
-          key: native-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: native-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-
+          key: native-package-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            native-package-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-
+            native-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-${{ hashFiles('Cargo.lock') }}
+            native-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-
       - name: Prepare release toolchain
         id: tools
         run: ./scripts/setup-ci-tools.ps1 -Installer

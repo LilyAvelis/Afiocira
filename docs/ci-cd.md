@@ -31,7 +31,9 @@ cancelled when a newer commit arrives. Different tags have independent groups.
   compatible lockfile updates can restore earlier native resources. Cached
   archives are SHA256-checked before use. These resources live in `.ci-cache/`,
   outside the Rust `target/` tree: Rust-cache prunes that tree before saving and
-  must not remove a different cache's inputs.
+  must not remove a different cache's inputs. Packaging uses its own native
+  primary key and can fall back to the check cache; this lets it save additional
+  release-only resources instead of losing them to an immutable exact hit.
 - **Test results are never cached.** A cache hit does not skip tests, Clippy,
   version checks or package verification. Compilation errors and failed tests
   are not retried. Named transient Zig fetch failures get at most three build
