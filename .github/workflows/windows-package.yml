@@ -158,6 +158,8 @@ jobs:
           path: target/release-assets/*
           if-no-files-found: error
           retention-days: 14
+          # Permit retrying this run's package job without an artifact-name conflict.
+          overwrite: true
 
   publish:
     name: Publish tagged release

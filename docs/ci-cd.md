@@ -53,15 +53,20 @@ make transfer and storage more expensive than the saved compilation.
    dependencies changed; changing Yazi also requires reviewing its adapter and
    reference presets.
 2. Push the source to main and require a green Windows check.
-3. Create an annotated vX.Y.Z tag at the intended source commit and push it.
+3. Run the workflow on main with package enabled before tagging. This produces
+   a verified unpublished candidate and seeds release/native caches on the
+   default branch, where subsequent tags can restore them. GitHub caches created
+   only on one tag cannot be restored by a different tag; see
+   [cache access restrictions](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).
+4. Create an annotated vX.Y.Z tag at that green candidate commit and push it.
    The tag must agree with the package version. Published tags are immutable.
-4. The workflow builds static-CRT binaries with remapped source paths, stages
+5. The workflow builds static-CRT binaries with remapped source paths, stages
    from a clean owned output directory, compiles Inno Setup and creates the ZIP
    and SHA256SUMS.txt. The manifest records the exact source SHA and file hashes.
-5. Verification checks asset names, sizes, SHA256, ZIP CRC/content, manifest
+6. Verification checks asset names, sizes, SHA256, ZIP CRC/content, manifest
    source/version and first-party binary build paths. Only after check/package
    success does a separate tag-only job receive contents-write permission.
-6. The publisher uses the job's GH_TOKEN, validates the actual remote tag SHA,
+7. The publisher uses the job's GH_TOKEN, validates the actual remote tag SHA,
    creates a marked draft, uploads and verifies all three server digests, then
    publishes. No personal token or local gh credentials are needed.
 
@@ -69,6 +74,10 @@ A failed upload can resume only its marked draft. An already-public managed
 release is accepted without writes only when its exact assets/tag match; public
 or unmarked drafts are never overwritten. A manual candidate run cannot publish.
 Keep release assets immutable; fix released product behavior with a new version.
+A package-job retry replaces only that workflow run's candidate artifact. If a
+release is already public, retry its publish job against the original artifact;
+rebuilding can produce different ZIP/installer bytes and will be rejected by
+the public-release digest guard.
 
 ## Local checks and candidates
 
