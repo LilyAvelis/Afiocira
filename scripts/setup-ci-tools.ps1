@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 . (Join-Path $PSScriptRoot 'ci-common.ps1')
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-$cache = Join-Path $root 'target/ci-tools'
+$cache = Get-CiCachePath -Name tools
 $toolchainPath = Join-Path $root 'rust-toolchain.toml'
 $toolchainConfig = Get-Content -LiteralPath $toolchainPath -Raw
 $channels = [regex]::Matches($toolchainConfig, '(?m)^\s*channel\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*(?:#.*)?$')

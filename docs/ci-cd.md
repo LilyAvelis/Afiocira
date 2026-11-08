@@ -29,7 +29,9 @@ cancelled when a newer commit arrives. Different tags have independent groups.
   content-addressed cache, pinned Yazi/font/VC++ archives and Everything helper
   archives. Keys include platform, setup/dependency configuration and Cargo.lock;
   compatible lockfile updates can restore earlier native resources. Cached
-  archives are SHA256-checked before use.
+  archives are SHA256-checked before use. These resources live in `.ci-cache/`,
+  outside the Rust `target/` tree: Rust-cache prunes that tree before saving and
+  must not remove a different cache's inputs.
 - **Test results are never cached.** A cache hit does not skip tests, Clippy,
   version checks or package verification. Compilation errors and failed tests
   are not retried. Named transient Zig fetch failures get at most three build

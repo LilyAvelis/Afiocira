@@ -3,6 +3,13 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/../ci-common.ps1"
 function Start-Sleep { param($Seconds) }
 function Assert($Condition, $Message) { if (-not $Condition) { throw $Message } }
+foreach ($name in @('tools', 'release-dependencies', 'everything-runtime', 'zig-global-cache')) {
+    $expected = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../../.ci-cache/$name"))
+    Assert ((Get-CiCachePath -Name $name) -eq $expected) 'Native cache must stay outside Rust target pruning'
+}
+$rejectedCacheName = $false
+try { Get-CiCachePath -Name '../target' | Out-Null } catch { $rejectedCacheName = $true }
+Assert $rejectedCacheName 'Cache names must reject traversal'
 $testRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../target/ci-self-tests'))
 $case = Join-Path $testRoot "common-$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $case -Force | Out-Null

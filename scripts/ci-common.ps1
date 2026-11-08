@@ -1,5 +1,14 @@
 #requires -Version 7.0
 # Shared by CI provisioning and release staging. Downloads are trusted only after SHA256 verification.
+function Get-CiCachePath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet('tools', 'release-dependencies', 'everything-runtime', 'zig-global-cache')][string]$Name
+    )
+    # Rust-cache prunes target during post-save. Native downloads must live outside it.
+    return [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "../.ci-cache/$($Name.ToLowerInvariant())"))
+}
+
 function Invoke-CheckedDownload {
     [CmdletBinding()]
     param(

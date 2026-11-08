@@ -21,7 +21,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/target/zig-global-cache
+  ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.ci-cache/zig-global-cache
 
 defaults:
   run:
@@ -41,12 +41,12 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
-            target/ci-tools
-            target/release-dependencies
-            target/everything-runtime
-            target/zig-global-cache
-          key: native-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: native-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-
+            .ci-cache/tools
+            .ci-cache/release-dependencies
+            .ci-cache/everything-runtime
+            .ci-cache/zig-global-cache
+          key: native-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: native-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-
       - name: Prepare pinned toolchain
         id: tools
         run: ./scripts/setup-ci-tools.ps1
@@ -54,7 +54,7 @@ jobs:
         id: rust
         uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
         with:
-          shared-key: check-v1-${{ steps.tools.outputs.environment-key }}
+          shared-key: check-v2-${{ steps.tools.outputs.environment-key }}
           cache-bin: false
           cache-on-failure: true
           cache-workspace-crates: false
@@ -116,12 +116,12 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
-            target/ci-tools
-            target/release-dependencies
-            target/everything-runtime
-            target/zig-global-cache
-          key: native-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: native-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-
+            .ci-cache/tools
+            .ci-cache/release-dependencies
+            .ci-cache/everything-runtime
+            .ci-cache/zig-global-cache
+          key: native-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: native-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/release-dependencies.json', 'scripts/setup-ci-tools.ps1', 'scripts/setup-everything.ps1', 'scripts/setup-native-tests.ps1', 'scripts/ci-common.ps1') }}-
       - name: Prepare release toolchain
         id: tools
         run: ./scripts/setup-ci-tools.ps1 -Installer
@@ -133,7 +133,7 @@ jobs:
       - name: Restore release dependency artifacts
         uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
         with:
-          shared-key: package-static-v1-${{ steps.tools.outputs.environment-key }}
+          shared-key: package-static-v2-${{ steps.tools.outputs.environment-key }}
           workspaces: . -> target/distribution
           cache-bin: false
           cache-on-failure: true

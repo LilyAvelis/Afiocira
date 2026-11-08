@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'ci-common.ps1')
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $target = if ([IO.Path]::IsPathRooted($TargetDirectory)) { $TargetDirectory } else { Join-Path $root $TargetDirectory }
-$cache = Join-Path $root 'target/release-dependencies'
+$cache = Get-CiCachePath -Name release-dependencies
 $lock = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'release-dependencies.json') -Raw | ConvertFrom-Json
 
 # Match release staging's cache names so CI test and packaging jobs can share the verified archives.

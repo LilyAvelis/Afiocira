@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 # Official voidtools ES, MIT licensed. No installer, index, or Everything settings changes.
 # Provenance: https://www.voidtools.com/downloads/
 # Protocol: https://www.voidtools.com/support/everything/command_line_interface/
-$cache = Join-Path $PSScriptRoot '..\target\everything-runtime'
+$cache = Get-CiCachePath -Name everything-runtime
 New-Item -ItemType Directory -Force $cache, $OutputDirectory | Out-Null
 $packages = @(
     @{ Name = 'ES-1.1.0.38.x64.zip'; Hash = '5E0C70CBF4F694080C34AA7C6C745E606C16FE76A4B5423B93EBF9DC34274C99'; Directory = 'binary' },
