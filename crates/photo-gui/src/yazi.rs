@@ -1687,6 +1687,7 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let fixture = std::env::temp_dir().join(format!("afio-mode-spot-{}", std::process::id()));
         fs::create_dir_all(&fixture).unwrap();
+        let fixture = PathBuf::from(crate::friendly_path(&fixture.canonicalize().unwrap()));
         let photo = fixture.join("synthetic.txt");
         fs::write(&photo, "Synthetic file information fixture").unwrap();
         fn read(pane: &mut YaziPane) -> NavigatorSnapshot {
@@ -1827,6 +1828,8 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let fixture =
             std::env::temp_dir().join(format!("afio-private-contract-{}", std::process::id()));
+        fs::create_dir_all(&fixture).unwrap();
+        let fixture = PathBuf::from(crate::friendly_path(&fixture.canonicalize().unwrap()));
         let a = fixture.join("album-a/a.jpg");
         let b = fixture.join("album-b/b.jpg");
         let c = fixture.join("external-c/c.jpg");
@@ -2007,6 +2010,8 @@ mod tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let fixture =
             std::env::temp_dir().join(format!("photo-workshop-navigate-{}", std::process::id()));
+        fs::create_dir_all(&fixture).unwrap();
+        let fixture = PathBuf::from(crate::friendly_path(&fixture.canonicalize().unwrap()));
         let folder = fixture.join("Unicode папка");
         fs::create_dir_all(folder.join("hovered-child")).unwrap();
         let photo = fixture.join("image.jpg");
@@ -2117,8 +2122,7 @@ mod tests {
         let second_folder = fixture.join("b-subfolder");
         fs::create_dir_all(&child_folder).unwrap();
         fs::create_dir_all(&second_folder).unwrap();
-        let mut pane = YaziPane::start(&fixture.canonicalize().unwrap())
-            .expect("installed Yazi should start in ConPTY");
+        let mut pane = YaziPane::start(&fixture).expect("installed Yazi should start in ConPTY");
         let deadline = Instant::now() + Duration::from_secs(8);
         let mut reported = None;
         while Instant::now() < deadline {
@@ -2287,6 +2291,7 @@ mod tests {
             std::env::temp_dir().join(format!("photo-workshop-sort-mouse-{}", std::process::id()));
         let _ = fs::remove_dir_all(&fixture);
         fs::create_dir_all(&fixture).unwrap();
+        let fixture = PathBuf::from(crate::friendly_path(&fixture.canonicalize().unwrap()));
         fs::create_dir_all(fixture.join("folder-a")).unwrap();
         for name in ["a.jpg", "b.jpg", "c.jpg"] {
             fs::write(fixture.join(name), b"test").unwrap();
