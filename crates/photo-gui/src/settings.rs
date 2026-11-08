@@ -11,6 +11,7 @@ pub(super) struct State {
     pub shortcuts: Value,
     pub gallery_scale: Option<f32>,
     pub gallery_auto_size: bool,
+    pub copy_notifications: bool,
     pub recording: Option<(photo_core::actions::ActionId, String)>,
     pub shortcut_candidate: Option<(photo_core::actions::ActionId, String, String)>,
     pub shortcut_filter: String,
@@ -35,7 +36,7 @@ const MODULES: &[Module] = &[
     Module {
         id: "afio",
         label: "Afio",
-        keywords: "shortcuts keyboard gallery scale клавиши масштаб",
+        keywords: "shortcuts keyboard gallery scale copy notifications клавиши масштаб копирование уведомления",
         icon: Lucide::Keyboard,
         render: Workshop::afio_settings,
     },
@@ -54,6 +55,7 @@ impl State {
             shortcuts: json!({}),
             gallery_scale: None,
             gallery_auto_size: true,
+            copy_notifications: true,
             recording: None,
             shortcut_candidate: None,
             shortcut_filter: String::new(),
@@ -67,6 +69,7 @@ impl State {
         };
         match config_path().and_then(|path| read_config(&path)) {
             Ok(document) => {
+                state.copy_notifications = copy_notifications(&document);
                 state.shortcuts = document
                     .get("shortcuts")
                     .filter(|v| v.is_object())
@@ -104,6 +107,7 @@ impl State {
             shortcuts: crate::shortcuts::catalogue(&self.shortcuts),
             gallery_scale: self.gallery_scale,
             gallery_auto_size: self.gallery_auto_size,
+            copy_notifications: self.copy_notifications,
         }
     }
     pub fn effective_gallery_scale(&self) -> Option<f32> {
@@ -155,6 +159,25 @@ pub(super) fn save_property(key: &str, value: Value) -> Result<(), String> {
         document[key] = value;
         Ok(())
     })
+}
+
+fn copy_notifications(document: &Value) -> bool {
+    document
+        .get("copy_notifications")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+}
+
+impl Workshop {
+    pub(super) fn set_copy_notifications(&mut self, enabled: bool) -> Result<(), String> {
+        if let Err(error) = save_property("copy_notifications", json!(enabled)) {
+            self.settings.error = Some(error.clone());
+            return Err(error);
+        }
+        self.settings.copy_notifications = enabled;
+        crate::copy_feedback::configure(&self.ctx, enabled);
+        Ok(())
+    }
 }
 
 /// All writers reread under this OS lock, which is released even after a crash.
@@ -610,6 +633,39 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
         }
         assert!(save_size(&path, f32::NAN).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn copy_notification_preference_defaults_on_and_persists_without_replacing_settings() {
+        assert!(copy_notifications(&json!({"version": 1})));
+        let root = std::env::temp_dir().join(format!(
+            "afio-copy-notifications-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("settings.json");
+        std::fs::write(&path, r#"{"version":1,"shortcuts":{"keep":true}}"#).unwrap();
+        update_config(&path, |document| {
+            document["copy_notifications"] = json!(false);
+            Ok(())
+        })
+        .unwrap();
+        let saved = read_config(&path).unwrap();
+        assert!(!copy_notifications(&saved));
+        assert_eq!(saved["shortcuts"]["keep"], true);
+        std::fs::write(&path, "{broken").unwrap();
+        assert!(
+            update_config(&path, |document| {
+                document["copy_notifications"] = json!(true);
+                Ok(())
+            })
+            .is_err()
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{broken");
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -1,6 +1,23 @@
 //! Application action service: every entry point reaches this dispatcher.
 use super::*;
 use photo_core::actions::{ActionId, ActionInfo, Context};
+
+fn clipboard_path_text(path: &std::path::Path) -> String {
+    let text = path.to_string_lossy();
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else {
+        text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
+    }
+}
+fn copied_gallery_path(gallery: &Gallery, selected: bool) -> Option<&std::path::Path> {
+    if selected || gallery.view() == View::Photo {
+        gallery.cursor_photo().map(|photo| photo.path.as_path())
+    } else {
+        Some(gallery.folder())
+    }
+}
+
 impl Workshop {
     pub(super) fn available_actions(&self) -> Vec<ActionInfo> {
         let gallery = self.gallery.as_ref();
@@ -16,6 +33,14 @@ impl Workshop {
             marked: gallery.is_some_and(|g| !g.marked_paths().is_empty()),
         });
         let context = self.shortcut_context();
+        let history = gallery
+            .and_then(Gallery::selected_photo)
+            .and_then(|p| self.history_panel.cache.get(&p.path));
+        actions.retain(|a| match a.id {
+            ActionId::Undo => history.is_some_and(|h| h.can_undo),
+            ActionId::Redo | ActionId::CommitHistory => history.is_some_and(|h| h.can_redo),
+            _ => true,
+        });
         for action in &mut actions {
             action.shortcut = shortcuts::effective(
                 &self.settings.shortcuts,
@@ -27,6 +52,9 @@ impl Workshop {
         actions
     }
     pub(super) fn run_action(&mut self, id: ActionId) -> Result<(), String> {
+        if self.image_tool_action() == Some(id) {
+            return self.apply_current_image();
+        }
         if id != ActionId::Settings && (self.image_dialog.is_some() || self.search.snapshot.open) {
             return Err("Close Everything search first".into());
         }
@@ -50,7 +78,59 @@ impl Workshop {
             return Err("Action is not available in this context".into());
         }
         self.close_palette();
+        if matches!(
+            id,
+            ActionId::ConvertImage
+                | ActionId::AdjustImage
+                | ActionId::AdjustDetails
+                | ActionId::AdjustVignette
+                | ActionId::RotateLeft
+                | ActionId::RotateRight
+                | ActionId::FlipHorizontal
+                | ActionId::FlipVertical
+                | ActionId::Rename
+        ) && !self.metadata_panel.close()
+        {
+            return Err("Сохраните или отмените изменения метаданных".into());
+        }
         match id {
+            ActionId::CopyPath | ActionId::CopySelectedPath => {
+                let gallery = self.gallery.as_ref().ok_or("Open a folder first")?;
+                let path = copied_gallery_path(gallery, id == ActionId::CopySelectedPath)
+                    .ok_or("Select a file first")?;
+                self.ctx.copy_text(clipboard_path_text(path));
+                crate::copy_feedback::copied(
+                    &self.ctx,
+                    if id == ActionId::CopySelectedPath || gallery.view() == View::Photo {
+                        "Путь к файлу скопирован"
+                    } else {
+                        "Путь к папке скопирован"
+                    },
+                );
+                Ok(())
+            }
+            ActionId::Metadata => {
+                if self.metadata_panel.is_open() {
+                    self.finish_metadata()
+                } else {
+                    self.open_metadata()
+                }
+            }
+            ActionId::History => {
+                if self.history_panel.open {
+                    self.history_panel.open = false;
+                    self.history_panel.reset_thumbnails();
+                    Ok(())
+                } else {
+                    self.history_command(photo_core::history::Operation::Inspect)
+                }
+            }
+            ActionId::Undo => self.history_command(photo_core::history::Operation::Undo),
+            ActionId::Redo => self.history_command(photo_core::history::Operation::Redo),
+            ActionId::CommitHistory => self.history_command(photo_core::history::Operation::Commit),
+            ActionId::AdjustImage | ActionId::AdjustDetails | ActionId::AdjustVignette => {
+                self.toggle_adjustment_tool(id)
+            }
             ActionId::RotateLeft
             | ActionId::RotateRight
             | ActionId::FlipHorizontal
@@ -168,9 +248,36 @@ impl Workshop {
         if !ctx.input(|i| i.focused) {
             return;
         }
+        if self.metadata_escape(ctx) {
+            return;
+        }
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, Key::Comma)) {
             if let Some(error) = self.execute(Command::ShowSettings).error {
                 self.message = error.message;
+            }
+            return;
+        }
+        if let Some(id) = self
+            .adjustment_tool_action()
+            .or_else(|| self.image_tool_action())
+        {
+            // Only the active tool's resolved shortcut may commit this panel.
+            // Text entry (including a slider's numeric editor) owns its keys.
+            {
+                let actions = self
+                    .available_actions()
+                    .into_iter()
+                    .filter(|a| {
+                        a.id == id
+                            || (self.active_pane != ActivePane::Yazi
+                                && matches!(a.id, ActionId::CopyPath | ActionId::CopySelectedPath))
+                    })
+                    .collect();
+                if let Some(id) = shortcuts::take_editor_action(ctx, actions)
+                    && let Some(error) = self.execute(Command::RunAction { id }).error
+                {
+                    self.message = error.message;
+                }
             }
             return;
         }
@@ -180,6 +287,7 @@ impl Workshop {
         {
             return;
         }
+        self.history_keyboard(ctx);
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, Key::K))
         {
             if self.image_dialog.is_some() || self.search.snapshot.open {
@@ -211,6 +319,30 @@ impl Workshop {
         if self.palette.open {
             return;
         }
+        if self.metadata_panel.is_open()
+            && !ctx.text_edit_focused()
+            && shortcuts::take_editor_enter(ctx, true)
+        {
+            if let Err(error) = self.finish_metadata() {
+                self.message = error;
+            }
+            return;
+        }
+        if self.active_pane == ActivePane::Gallery {
+            let panel_actions = self
+                .available_actions()
+                .into_iter()
+                .filter(|a| matches!(a.id, ActionId::Metadata | ActionId::History))
+                .collect();
+            if let Some(id) =
+                ctx.input_mut(|input| shortcuts::take_action(input, panel_actions, false, false))
+            {
+                if let Some(error) = self.execute(Command::RunAction { id }).error {
+                    self.message = error.message;
+                }
+                return;
+            }
+        }
         if ctx.memory(|m| m.focused() == Some(egui::Id::new("folder-path"))) {
             return;
         }
@@ -227,6 +359,64 @@ impl Workshop {
             && let Some(error) = self.execute(Command::RunAction { id }).error
         {
             self.message = error.message;
+        }
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::clipboard_path_text;
+    use std::path::Path;
+    #[test]
+    fn gallery_copy_uses_cursor_instead_of_last_opened_image() {
+        let dir = std::env::temp_dir().join(format!(
+            "afio-copy-path-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.jpg"), []).unwrap();
+        std::fs::write(dir.join("b.jpg"), []).unwrap();
+        let mut gallery = photo_core::Gallery::open(&dir).unwrap();
+        gallery.open_photo(0);
+        gallery.back_to_grid();
+        gallery.set_grid_anchor(1);
+        assert_eq!(
+            super::copied_gallery_path(&gallery, true)
+                .unwrap()
+                .file_name()
+                .unwrap(),
+            "b.jpg"
+        );
+        assert_eq!(
+            super::copied_gallery_path(&gallery, false).unwrap(),
+            gallery.folder()
+        );
+        gallery.open_photo(0);
+        assert_eq!(
+            super::copied_gallery_path(&gallery, false)
+                .unwrap()
+                .file_name()
+                .unwrap(),
+            "a.jpg"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn clipboard_paths_keep_full_plain_absolute_paths() {
+        for (input, expected) in [
+            (r"\\?\C:\Users\Lilia\photo.jpg", r"C:\Users\Lilia\photo.jpg"),
+            (
+                r"\\?\UNC\server\share\photo.jpg",
+                r"\\server\share\photo.jpg",
+            ),
+            (r"C:\Users\Lilia\folder", r"C:\Users\Lilia\folder"),
+            (r"\\server\share\photo.jpg", r"\\server\share\photo.jpg"),
+        ] {
+            assert_eq!(clipboard_path_text(Path::new(input)), expected);
         }
     }
 }

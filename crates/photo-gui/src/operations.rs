@@ -25,12 +25,38 @@ fn track_transform(source: &Path, duration: Duration) {
 pub(super) struct Worker {
     tasks: SyncSender<Task>,
     results: Receiver<Completed>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+impl Drop for Worker {
+    fn drop(&mut self) {
+        let (closed, _) = mpsc::sync_channel(0);
+        drop(std::mem::replace(&mut self.tasks, closed));
+        if let Some(thread) = self.thread.take() {
+            // Finish an admitted file operation and let the session store clean
+            // its own snapshots before normal process exit. Drain receipts so
+            // the bounded result channel cannot block worker shutdown.
+            while !thread.is_finished() {
+                while self.results.try_recv().is_ok() {}
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let _ = thread.join();
+        }
+    }
 }
 struct Completed {
+    history: Option<photo_core::history::HistorySnapshot>,
+    history_preview: Option<(usize, egui::ColorImage)>,
+    history_preview_request: Option<(usize, HistoryPreviewRequest)>,
     state: OperationState,
     submitted: Instant,
     session_id: String,
     saved_preview: Option<crate::resize_image::SavedPreview>,
+}
+#[derive(Clone, Copy)]
+pub(super) struct HistoryPreviewRequest {
+    pub epoch: u64,
+    pub selection: u64,
+    pub canvas: bool,
 }
 struct Task {
     submitted: Instant,
@@ -39,6 +65,16 @@ struct Task {
     session_id: String,
 }
 pub(super) enum TaskKind {
+    Adjust {
+        source: PathBuf,
+        version: photo_core::rename::SourceVersion,
+        options: photo_core::adjustments::AdjustmentOptions,
+    },
+    History {
+        source: PathBuf,
+        op: photo_core::history::Operation,
+        preview: Option<HistoryPreviewRequest>,
+    },
     VideoFrame {
         source: PathBuf,
         version: photo_core::rename::SourceVersion,
@@ -75,6 +111,13 @@ pub(super) enum TaskKind {
 impl TaskKind {
     fn action(&self) -> ActionId {
         match self {
+            Self::Adjust { .. } => ActionId::AdjustImage,
+            Self::History { op, .. } => match op {
+                photo_core::history::Operation::Undo => ActionId::Undo,
+                photo_core::history::Operation::Redo => ActionId::Redo,
+                photo_core::history::Operation::Commit => ActionId::CommitHistory,
+                _ => ActionId::History,
+            },
             Self::VideoFrame { action, .. } => *action,
             Self::Transform { action, .. } => *action,
             Self::Image { convert, .. } => {
@@ -93,6 +136,7 @@ impl TaskKind {
     }
     fn paths(&self) -> Vec<PathBuf> {
         match self {
+            Self::Adjust { source, .. } | Self::History { source, .. } => vec![source.clone()],
             Self::VideoFrame { source, .. } => vec![source.clone()],
             Self::Transform { source, .. } => vec![source.clone()],
             Self::Image { source, .. } => vec![source.clone()],
@@ -135,14 +179,119 @@ fn import_files(folder: &Path, paths: Vec<PathBuf>) -> Vec<FileResult> {
         })
         .collect()
 }
+fn history_snapshot(
+    store: Option<&photo_history::HistoryStore>,
+    path: &Path,
+) -> photo_core::history::HistorySnapshot {
+    let view = store.and_then(|s| s.inspect(path));
+    photo_core::history::HistorySnapshot {
+        path: path.to_owned(),
+        versions: view
+            .as_ref()
+            .map(|v| {
+                v.versions
+                    .iter()
+                    .map(|n| photo_core::history::HistoryNode {
+                        path: n.source_path.clone(),
+                        bytes: n.bytes,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        cursor: view.as_ref().map(|v| v.selected),
+        can_undo: view.as_ref().is_some_and(|v| v.can_undo),
+        can_redo: view.as_ref().is_some_and(|v| v.can_redo),
+    }
+}
+fn prepare_history(
+    history: &mut Option<photo_history::HistoryStore>,
+    path: &Path,
+    version: &photo_core::rename::SourceVersion,
+) -> Result<photo_history::Ticket, String> {
+    if history.is_none() {
+        let root = photo_registry::default_data_home()
+            .map_err(|e| e.message)?
+            .join("history-sessions");
+        *history = Some(
+            photo_history::HistoryStore::new(&root, 1024 * 1024 * 1024)
+                .map_err(|e| e.to_string())?,
+        );
+    }
+    history
+        .as_mut()
+        .unwrap()
+        .prepare_before(path, version)
+        .map_err(|e| e.to_string())
+}
+fn rebind_metadata(
+    source: &Path,
+    before: &photo_core::rename::SourceVersion,
+    destination: &Path,
+    after: &photo_core::rename::SourceVersion,
+    warnings: &mut Vec<String>,
+) {
+    let result = photo_registry::default_data_home().and_then(|home| {
+        photo_registry::Registry::new(home).rebind_known(source, before, destination, after)
+    });
+    if let Err(e) = result {
+        warnings.push(format!(
+            "Файл сохранён, но привязка метаданных не обновлена: {}",
+            e.message
+        ));
+    }
+}
+fn finalize_change(
+    history: &mut Option<photo_history::HistoryStore>,
+    ticket: Option<photo_history::Ticket>,
+    source: &Path,
+    before: &photo_core::rename::SourceVersion,
+    destination: &Path,
+    warnings: &mut Vec<String>,
+) -> Option<photo_core::history::HistorySnapshot> {
+    let after = match photo_core::rename::capture(destination) {
+        Ok(v) => v,
+        Err(e) => {
+            warnings.push(format!(
+                "Файл сохранён; невозможно проверить результат: {e}"
+            ));
+            return None;
+        }
+    };
+    if let Some(store) = history.as_mut() {
+        let result = if let Some(ticket) = ticket {
+            store.commit_after(ticket, destination, &after)
+        } else {
+            store.amend_current(source, before, destination, &after)
+        };
+        if let Err(e) = result {
+            warnings.push(format!("Файл сохранён; история: {e}"));
+        }
+    }
+    rebind_metadata(source, before, destination, &after, warnings);
+    history
+        .as_ref()
+        .and_then(|store| store.inspect(destination))
+        .map(|_| history_snapshot(history.as_ref(), destination))
+}
 impl Worker {
     pub fn start(ctx: egui::Context) -> Self {
         let (tasks, receiver) = mpsc::sync_channel::<Task>(1);
         let (sender, results) = mpsc::sync_channel(1);
-        std::thread::spawn(move || {
+        let thread = std::thread::spawn(move || {
+            let mut history: Option<photo_history::HistoryStore> = None;
             while let Ok(task) = receiver.recv() {
+                let history_preview_request = match &task.kind {
+                    TaskKind::History {
+                        op: photo_core::history::Operation::Preview(index),
+                        preview: Some(request),
+                        ..
+                    } => Some((*index, *request)),
+                    _ => None,
+                };
                 let work_started = Instant::now();
                 let mut saved_preview = None;
+                let mut history_view = None;
+                let mut history_preview = None;
                 let mut state = OperationState {
                     id: task.id,
                     action: task.kind.action(),
@@ -155,6 +304,109 @@ impl Worker {
                     }),
                 };
                 match task.kind {
+                    TaskKind::History {
+                        source,
+                        op,
+                        preview,
+                    } => {
+                        use photo_core::history::Operation;
+                        let result = (|| -> Result<Option<PathBuf>, String> {
+                            let Some(store) = &mut history else {
+                                if matches!(op, Operation::Inspect) {
+                                    return Ok(None);
+                                }
+                                return Err("У изображения нет истории текущей сессии".into());
+                            };
+                            match op {
+                                Operation::Inspect => Ok(None),
+                                Operation::Preview(index) => {
+                                    let path =
+                                        store.preview(&source, index).ok_or("Версия не найдена")?;
+                                    history_preview = Some((
+                                        index,
+                                        crate::decode::decode(
+                                            &path,
+                                            if preview.is_some_and(|p| p.canvas) {
+                                                1600
+                                            } else {
+                                                256
+                                            },
+                                        )?,
+                                    ));
+                                    Ok(None)
+                                }
+                                Operation::Commit => {
+                                    store.commit_current(&source).map_err(|e| e.to_string())?;
+                                    Ok(None)
+                                }
+                                Operation::Undo | Operation::Redo => {
+                                    let before = photo_core::rename::capture(&source)
+                                        .map_err(|e| e.to_string())?;
+                                    let restored = if matches!(op, Operation::Undo) {
+                                        store.undo(&source, &before)
+                                    } else {
+                                        store.redo(&source, &before)
+                                    }
+                                    .map_err(|e| e.to_string())?;
+                                    rebind_metadata(
+                                        &source,
+                                        &before,
+                                        &restored.path,
+                                        &restored.version,
+                                        &mut state.warnings,
+                                    );
+                                    Ok(Some(restored.path))
+                                }
+                            }
+                        })();
+                        let path = result
+                            .as_ref()
+                            .ok()
+                            .and_then(|p| p.as_ref())
+                            .unwrap_or(&source);
+                        history_view = Some(history_snapshot(history.as_ref(), path));
+                        let (destination, error) = match result {
+                            Ok(path) => (path, None),
+                            Err(e) => (None, Some(e)),
+                        };
+                        state.files.push(FileResult {
+                            source,
+                            destination,
+                            error,
+                        });
+                    }
+                    TaskKind::Adjust {
+                        source,
+                        version,
+                        options,
+                    } => {
+                        let result = (|| -> Result<crate::resize_image::SavedPreview, String> {
+                            let ticket = prepare_history(&mut history, &source, &version)?;
+                            let output = crate::adjust_image::process(&source, &version, &options)?;
+                            history_view = finalize_change(
+                                &mut history,
+                                Some(ticket),
+                                &source,
+                                &version,
+                                &output.published.path,
+                                &mut state.warnings,
+                            );
+                            Ok(output)
+                        })();
+                        let (destination, error) = match result {
+                            Ok(output) => {
+                                let path = output.published.path.clone();
+                                saved_preview = Some(output);
+                                (Some(path), None)
+                            }
+                            Err(e) => (None, Some(e)),
+                        };
+                        state.files.push(FileResult {
+                            source,
+                            destination,
+                            error,
+                        });
+                    }
                     TaskKind::VideoFrame {
                         source,
                         version,
@@ -204,6 +456,14 @@ impl Worker {
                             crate::resize_image::transform_in_place(&source, &version, action);
                         let (destination, error) = match result {
                             Ok(output) => {
+                                history_view = finalize_change(
+                                    &mut history,
+                                    None,
+                                    &source,
+                                    &version,
+                                    &output.path,
+                                    &mut state.warnings,
+                                );
                                 state.warnings.push(output.metadata_notice.into());
                                 saved_preview = output.saved_preview;
                                 (Some(output.path), None)
@@ -222,8 +482,27 @@ impl Worker {
                         options,
                         convert,
                     } => {
-                        let result =
-                            crate::image_actions::process(&source, &version, &options, convert);
+                        let result = (|| {
+                            let ticket = if convert {
+                                Some(prepare_history(&mut history, &source, &version)?)
+                            } else {
+                                None
+                            };
+                            let result = crate::image_actions::process(
+                                &source, &version, &options, convert,
+                            )?;
+                            if convert {
+                                history_view = finalize_change(
+                                    &mut history,
+                                    ticket,
+                                    &source,
+                                    &version,
+                                    &result.0,
+                                    &mut state.warnings,
+                                );
+                            }
+                            Ok::<_, String>(result)
+                        })();
                         let (destination, error) = match result {
                             Ok((path, notice)) => {
                                 state.warnings.push(notice);
@@ -319,6 +598,16 @@ impl Worker {
                                 break result;
                             }
                         };
+                        if let Ok(destination) = &result {
+                            history_view = finalize_change(
+                                &mut history,
+                                None,
+                                &source,
+                                &version,
+                                destination,
+                                &mut state.warnings,
+                            );
+                        }
                         state.files.push(outcome(source, result));
                     }
                 }
@@ -327,6 +616,9 @@ impl Worker {
                 }
                 if sender
                     .send(Completed {
+                        history: history_view,
+                        history_preview,
+                        history_preview_request,
                         state,
                         submitted: task.submitted,
                         session_id: task.session_id,
@@ -339,7 +631,11 @@ impl Worker {
                 ctx.request_repaint();
             }
         });
-        Self { tasks, results }
+        Self {
+            tasks,
+            results,
+            thread: Some(thread),
+        }
     }
 }
 impl Workshop {
@@ -387,6 +683,22 @@ impl Workshop {
         self.start_task(TaskKind::Import { folder, paths })
     }
     pub(super) fn start_task(&mut self, kind: TaskKind) -> Result<(), String> {
+        let edits_source = matches!(
+            &kind,
+            TaskKind::Transform { .. }
+                | TaskKind::Adjust { .. }
+                | TaskKind::Rename { .. }
+                | TaskKind::Image { convert: true, .. }
+                | TaskKind::History {
+                    op: photo_core::history::Operation::Undo
+                        | photo_core::history::Operation::Redo
+                        | photo_core::history::Operation::Commit,
+                    ..
+                }
+        );
+        if edits_source && (self.metadata.busy() || self.metadata_panel.is_dirty()) {
+            return Err("Сначала завершите сохранение метаданных".into());
+        }
         let submitted = Instant::now();
         self.visual_probe = None;
         self.retire_transform_animation();
@@ -483,6 +795,112 @@ impl Workshop {
                 continue;
             }
             let mut result = completed.state;
+            if self
+                .adjustment_commit_preview
+                .as_ref()
+                .is_some_and(|(id, _, _)| *id == result.id)
+            {
+                self.adjustment_commit_preview = None;
+            }
+            if result.files.iter().any(|f| f.destination.is_some())
+                && matches!(
+                    result.action,
+                    ActionId::AdjustImage
+                        | ActionId::ConvertImage
+                        | ActionId::RotateLeft
+                        | ActionId::RotateRight
+                        | ActionId::FlipHorizontal
+                        | ActionId::FlipVertical
+                        | ActionId::Rename
+                        | ActionId::Undo
+                        | ActionId::Redo
+                )
+            {
+                self.history_panel.reset_thumbnails();
+            }
+            let history_target = self.history_panel.target.clone();
+            if let Some(snapshot) = completed.history {
+                // Never let a late completion open a panel on another image.
+                let current = self
+                    .gallery
+                    .as_ref()
+                    .and_then(Gallery::selected_photo)
+                    .map(|p| p.path.clone());
+                let matching = current.as_ref() == Some(&snapshot.path)
+                    || result
+                        .files
+                        .iter()
+                        .any(|f| Some(&f.source) == current.as_ref());
+                let was_open = self.history_panel.open;
+                if !matching {
+                    self.history_panel.open = false;
+                }
+                self.history_panel.accept(snapshot);
+                if !matching {
+                    self.history_panel.open = was_open;
+                    self.history_panel.target = history_target;
+                }
+            }
+            if let Some((index, pixels)) = completed.history_preview {
+                if self.history_panel.open
+                    && self
+                        .history_panel
+                        .target
+                        .as_ref()
+                        .is_some_and(|p| result.files.iter().any(|f| &f.source == p))
+                    && let Some((_, request)) = completed.history_preview_request
+                    && self.history_panel.accepts_request(request)
+                {
+                    let texture = ctx.load_texture(
+                        format!("history-preview-{}", result.id),
+                        pixels,
+                        TextureOptions::LINEAR,
+                    );
+                    if request.canvas {
+                        self.history_panel.accept_canvas(index, request, texture);
+                    } else {
+                        self.history_panel.accept_preview(index, texture);
+                    }
+                }
+            } else if matches!(
+                result.action,
+                ActionId::Undo | ActionId::Redo | ActionId::CommitHistory
+            ) {
+                self.history_panel.preview = None;
+            }
+            if matches!(result.action, ActionId::History | ActionId::CommitHistory) {
+                if let Some((index, request)) = completed.history_preview_request
+                    && let Some(error) = result.files.iter().find_map(|f| f.error.clone())
+                    && self.history_panel.accepts_request(request)
+                {
+                    if request.canvas {
+                        self.history_panel.fail_canvas(index, request, error);
+                    } else {
+                        self.history_panel.fail_preview(index, error);
+                    }
+                }
+                let relevant = completed
+                    .history_preview_request
+                    .is_none_or(|(index, request)| {
+                        self.history_panel.accepts_request(request)
+                            && (!request.canvas
+                                || self.history_panel.current_canvas_request(index, request))
+                    });
+                if relevant {
+                    self.history_panel.error = result.files.iter().find_map(|f| f.error.clone());
+                    self.message = self
+                        .history_panel
+                        .error
+                        .clone()
+                        .unwrap_or_else(|| "История текущей сессии".into());
+                }
+                self.operation = Some(result);
+                self.operation_origin = None;
+                continue;
+            }
+            if matches!(result.action, ActionId::Undo | ActionId::Redo) {
+                self.history_panel.error = result.files.iter().find_map(|f| f.error.clone());
+            }
             if let Some(animation) = &mut self.transform_animation {
                 animation.complete(
                     result.id,
@@ -520,7 +938,10 @@ impl Workshop {
                     ));
                 }
                 let refresh_started = Instant::now();
-                if matches!(result.action, ActionId::Rename | ActionId::ConvertImage) {
+                if matches!(
+                    result.action,
+                    ActionId::Rename | ActionId::ConvertImage | ActionId::Undo | ActionId::Redo
+                ) {
                     for file in &result.files {
                         if let Some(destination) = &file.destination {
                             self.gallery
@@ -536,6 +957,7 @@ impl Workshop {
                         | ActionId::RotateRight
                         | ActionId::FlipHorizontal
                         | ActionId::FlipVertical
+                        | ActionId::AdjustImage
                 );
                 if !transformed {
                     let _ = self.refresh_after_delete();
@@ -553,6 +975,9 @@ impl Workshop {
                 if matches!(
                     result.action,
                     ActionId::ResizeImage
+                        | ActionId::AdjustImage
+                        | ActionId::Undo
+                        | ActionId::Redo
                         | ActionId::ConvertImage
                         | ActionId::RotateLeft
                         | ActionId::RotateRight

@@ -1,6 +1,26 @@
 use super::*;
 impl Workshop {
     pub(super) fn execute(&mut self, command: Command) -> Response {
+        if self.adjustments_panel.is_some()
+            && matches!(
+                &command,
+                Command::Open { .. }
+                    | Command::PreviewFolder { .. }
+                    | Command::Select { .. }
+                    | Command::SelectPath { .. }
+                    | Command::OpenSelected
+                    | Command::Next
+                    | Command::Previous
+                    | Command::Back
+                    | Command::OpenDropped { .. }
+            )
+        {
+            return Response::error(
+                ErrorCode::InvalidState,
+                "Примените или отмените коррекцию перед переходом",
+                self.gallery.as_ref(),
+            );
+        }
         self.navigation_dispatch_started();
         self.cancel_navigator_continuation(&command);
         if matches!(command, Command::NavigatorSnapshot)
@@ -58,7 +78,42 @@ impl Workshop {
             _ => ErrorCode::InvalidState,
         };
         let mut navigator_location = None;
+        let mut metadata_job = None;
         let result: Result<(), String> = match command {
+            Command::ShowMetadata => self.open_metadata(),
+            Command::CloseMetadata => self.close_metadata(),
+            Command::CancelMetadata => {
+                self.cancel_metadata();
+                Ok(())
+            }
+            Command::SubmitMetadata { metadata } => self.submit_panel_metadata(metadata),
+            Command::DiscardMetadata => self.discard_panel_metadata(),
+            Command::ShowHistory => self.history_command(photo_core::history::Operation::Inspect),
+            Command::CloseHistory => {
+                self.history_panel.open = false;
+                self.history_panel.reset_thumbnails();
+                Ok(())
+            }
+            Command::PreviewHistory { index } => {
+                self.history_command(photo_core::history::Operation::Preview(index))
+            }
+            Command::UndoHistory => self.history_command(photo_core::history::Operation::Undo),
+            Command::RedoHistory => self.history_command(photo_core::history::Operation::Redo),
+            Command::CommitHistory => self.history_command(photo_core::history::Operation::Commit),
+            Command::ShowAdjustments => self.begin_adjustments(),
+            Command::ApplyAdjustments => self.apply_adjustments(),
+            Command::PreviewAdjustments { options } => self.preview_adjustments(options),
+            Command::SubmitAdjustments { options } => self.submit_adjustments(options),
+            Command::CancelAdjustments => {
+                self.cancel_adjustments();
+                Ok(())
+            }
+            Command::Metadata { request } => self.metadata.submit(request, &self.ctx).map(|job| {
+                metadata_job = Some(job);
+            }),
+            Command::MetadataStatus { request_id } => self.metadata.status(request_id).map(|job| {
+                metadata_job = Some(job);
+            }),
             Command::SelectSettings { section, page } => {
                 self.select_settings(&section, page.as_deref())
             }
@@ -71,6 +126,7 @@ impl Workshop {
             } => self.set_shortcut(action, context, binding, reset, replace),
             Command::SetGalleryScale { scale } => self.set_gallery_scale(scale),
             Command::SetGalleryAutoSize { enabled } => self.set_gallery_auto_size(enabled),
+            Command::SetCopyNotifications { enabled } => self.set_copy_notifications(enabled),
             Command::ConfigureYazi { request } => self.configure_yazi(request),
             Command::ShowSettings => self.open_settings(),
             Command::CloseSettings => {
@@ -361,6 +417,11 @@ impl Workshop {
             Err(error) => Response::error(error_code, error, self.gallery.as_ref()),
         };
         self.sync_video();
+        response.metadata = metadata_job;
+        response.metadata_panel = Some(self.metadata_panel.panel_state());
+        response.history = Some(self.history_panel.snapshot());
+        response.adjustments_open = self.adjustments_panel.is_some();
+        response.adjustments_preview = self.adjustments_preview_state();
         response.image_dialog = self.image_dialog.as_ref().map(|d| d.snapshot.clone());
         let mut nested = self.nested.snapshot.clone();
         nested.overview = self.album_mode()
@@ -434,7 +495,7 @@ impl Workshop {
             request_id: self.navigator_pending_request(),
             folder: navigator_location.as_ref().map(|s| s.folder.clone()),
             hovered: navigator_location.and_then(|s| s.hovered),
-            visible: self.show_yazi,
+            visible: self.navigator_rendered(),
             focus: if self.active_pane == ActivePane::Gallery {
                 Pane::Gallery
             } else {

@@ -7,13 +7,15 @@ import os
 from pathlib import Path
 import subprocess
 import time
+import tomllib
 import uuid
 
 PROJECT = Path(__file__).resolve().parents[1]
-ROOT = PROJECT / 'target' / ('installer-25-' + uuid.uuid4().hex[:8])
+VERSION = tomllib.loads((PROJECT / 'crates/photo-gui/Cargo.toml').read_text(encoding='utf8'))['package']['version']
+ROOT = PROJECT / 'target' / ('installer-' + VERSION + '-' + uuid.uuid4().hex[:8])
 ROOT.mkdir(parents=True)
 INSTALL = ROOT / 'installed'
-SETUP = PROJECT / 'target/release-assets/Afiocira-2.5.0-Setup-Windows-x64.exe'
+SETUP = PROJECT / 'target/release-assets' / f'Afiocira-{VERSION}-Setup-Windows-x64.exe'
 PIPE_NAME = 'afio-install-' + uuid.uuid4().hex
 PIPE = '\\\\.\\pipe\\' + PIPE_NAME
 flags = subprocess.CREATE_NO_WINDOW
@@ -39,7 +41,7 @@ def rpc(command='status', **args):
                 image = ctypes.create_unicode_buffer(32768)
                 size = wintypes.DWORD(len(image))
                 assert kernel.QueryFullProcessImageNameW(handle, 0, image, ctypes.byref(size))
-                assert Path(image.value).resolve() == (INSTALL / 'releases/2.5.0/Afiocira.exe').resolve()
+                assert Path(image.value).resolve() == (INSTALL / 'releases' / VERSION / 'Afiocira.exe').resolve()
                 pid = server.value
             finally:
                 kernel.CloseHandle(handle)
@@ -76,8 +78,8 @@ try:
                                 '/TESTMODE=1', '/TASKS=', '/DIR=' + str(INSTALL), '/LOG=' + str(ROOT/'install.log')],
                                creationflags=flags, timeout=90, check=False)
     assert installed.returncode == 0, installed.returncode
-    release = INSTALL / 'releases/2.5.0'
-    assert (INSTALL/'current-version.txt').read_text().strip() == 'releases\\2.5.0\\Afiocira.exe'
+    release = INSTALL / 'releases' / VERSION
+    assert (INSTALL/'current-version.txt').read_text().strip() == str(Path('releases') / VERSION / 'Afiocira.exe')
     assert not (release/'libmpv-2.dll').exists() and not (release/'ffmpeg.exe').exists()
     listing = subprocess.check_output([str(release/'photo-cli.exe'), 'list', str(release/'test-images')],
                                       text=True, encoding='utf8', creationflags=flags)

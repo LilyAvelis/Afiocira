@@ -1,0 +1,9 @@
+[package]
+name = "photo-history"
+version = "3.0.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+blake3 = "=1.8.7"
+photo-core = { path = "../photo-core" }

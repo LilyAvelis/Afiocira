@@ -1,5 +1,5 @@
 #ifndef Version
-  #define Version "2.5.0"
+  #define Version "3.0.0"
 #endif
 #ifndef Stage
   #define Stage "..\target\package-" + Version

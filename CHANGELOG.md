@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.0.0 — 2026-11-08
+
+Release tag: `v3.0.0`. See [release notes](docs/releases/v3.0.0.md) and the
+[verification record](docs/release-3.0.md). Publication remains subject to the
+tagged Windows workflow.
+
+- Add sparse SQLite storage for Afio tags, comment and description. Browsing and read-only inspection do not register images; saving notes is explicit.
+- Display supported XMP, EXIF/IPTC, ICC/header information and PNG generation metadata, including complete ComfyUI workflow JSON, in a separate read-only file section.
+- Add temporary SSD-backed session history with exact-byte undo/redo, thumbnail previews and explicit Ctrl+S truncation of the redo continuation. Rotation and reflection do not create versions.
+- Add three photo tools: Light and Color, Details and Vignette, with fifteen controls plus a tone curve, live preview, Apply/Cancel/Reset and history integration. Curve output may rise or fall.
+- Preserve supported JPEG XMP and photometric metadata during checked edits; validate on a copy while retaining the original test source.
+- Add Copy Path and a persistent preference for copy confirmation.
+- Fix Metadata Escape cancellation and focus handling, shortcut dispatch and editor submission. Ctrl+L received manual user validation.
+- Integrate version-driven Windows checks, verified candidate packaging and tag-only publication.
+
+Full color management, HEIC/RAW decoding, persistent history, Fork, tag search and
+dataset export are not included. Ctrl+G UX is reserved for 3.1; persistent history
+for 3.2; ComfyUI execution remains future work without an assigned version.
+
 ## 2.5.0 — 2026-11-08
 
 Full release notes and Windows downloads: [v2.5.0](https://github.com/LilyAvelis/Afiocira/releases/tag/v2.5.0).

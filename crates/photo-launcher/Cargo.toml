@@ -1,5 +1,5 @@
 [package]
 name = "photo-launcher"
-version = "2.5.0"
+version = "3.0.0"
 edition = "2024"
 license = "MIT"

@@ -1,8 +1,10 @@
 # Public release validation
 
-Afiocira 2.5.0 source, installer, portable ZIP and checksums are associated with [v2.5.0](https://github.com/LilyAvelis/Afiocira/releases/tag/v2.5.0). The [2.5 release record](release-2.5.md) describes the full implemented scope, reproduction steps and evidence. Preserve the [2.0 record](release-2.0.md) as historical evidence; public history retains the original 1.0 commit and does not merge private development history.
+Afiocira 3.0.0 targets tag `v3.0.0`. See the [3.0 verification record](release-3.0.md), [release notes](releases/v3.0.0.md) and [publication status](https://github.com/LilyAvelis/Afiocira/releases/tag/v3.0.0). The [2.5 record](release-2.5.md), [published v2.5.0](https://github.com/LilyAvelis/Afiocira/releases/tag/v2.5.0) and [2.0 record](release-2.0.md) remain historical evidence for their own versions.
 
-The final full local run passed 191 unit/native tests and 3 doctests, including automatic sizing; formatting, strict Clippy and the static-CRT build passed. The staged portable package passed its manifest hashes, a three-image CLI listing, isolated native Yazi theme switching/persistence and UTF-8/UTF-16LE workspace/user-home path scans. Silent TESTMODE install/launch/Settings/theme/uninstall checks passed in an isolated directory. Video binaries were absent. Isolated native API checks supplement unit tests. Physical keyboard behavior and user-reported Settings visual feedback are not blanket-certified by these checks.
+The last reported local run passed 296 Rust unit/native tests and 3 doctests, formatting and strict Clippy, supplemented by isolated native synthetic scenarios for metadata, temporary history and live-preview editing. Ctrl+L received manual user validation. These results do not certify all physical shortcuts or image formats. Historical package results do not certify the 3.0 candidate.
+
+The [Windows pipeline](ci-cd.md) checks main and PR commits. `workflow_dispatch` with `package=true` creates an unpublished verified candidate. A matching stable version tag runs check → package → publish. Require green results for the exact release commit and record actual package/publication evidence after it exists.
 
 Installer/portable preparation includes Yazi, ES, Nerd Font and component notices. Optional video setup downloads checksummed libmpv/FFmpeg directly from upstream on the user's machine; those binaries are not bundled.
 

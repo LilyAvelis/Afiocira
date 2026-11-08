@@ -193,18 +193,22 @@ impl Workshop {
             release_keyboard_focus(ui);
             self.active_pane = ActivePane::Gallery;
         }
-        if let Some(texture) = self
-            .transform_animation
-            .as_ref()
-            .map(|animation| animation.texture())
-            .or_else(|| {
-                self.previews
-                    .get(&index)
-                    .or_else(|| self.thumbnails.get(&index))
-                    .or_else(|| self.fallback_previews.get(&index))
-                    .cloned()
-            })
-        {
+        let history_texture = self
+            .history_panel
+            .canvas_texture(&self.gallery.as_ref().unwrap().photos()[index].path);
+        let history_preview = history_texture.is_some();
+        if let Some(texture) = self.adjustment_texture().or(history_texture).or_else(|| {
+            self.transform_animation
+                .as_ref()
+                .map(|animation| animation.texture())
+                .or_else(|| {
+                    self.previews
+                        .get(&index)
+                        .or_else(|| self.thumbnails.get(&index))
+                        .or_else(|| self.fallback_previews.get(&index))
+                        .cloned()
+                })
+        }) {
             let natural = texture.size_vec2();
             let fitted = crate::layout::fit_rect(rect, natural).size();
             let viewport = Size {
@@ -262,7 +266,7 @@ impl Workshop {
             let gallery = self.gallery.as_mut().unwrap();
             gallery.constrain_zoom(viewport, fitted_size);
             let zoom = gallery.zoom();
-            if let Some(animation) = &self.transform_animation {
+            if !history_preview && let Some(animation) = &self.transform_animation {
                 animation.paint(
                     ui,
                     rect,

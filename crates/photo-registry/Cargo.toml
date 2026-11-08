@@ -1,0 +1,14 @@
+[package]
+name = "photo-registry"
+version = "3.0.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+photo-core = { path = "../photo-core" }
+rusqlite = { version = "=0.41.1", default-features = false, features = ["bundled", "backup"] }
+uuid = { version = "1.29.1", features = ["v4"] }
+unicode-normalization = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
