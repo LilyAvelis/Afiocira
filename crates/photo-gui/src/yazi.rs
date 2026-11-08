@@ -2109,6 +2109,10 @@ mod tests {
             std::process::id()
         ));
         let _ = fs::remove_dir_all(&fixture);
+        fs::create_dir_all(&fixture).unwrap();
+        // RUNNER_TEMP can contain an 8.3 alias; Yazi reports the long path.
+        // Compare the same directory spelling throughout this native fixture.
+        let fixture = PathBuf::from(crate::friendly_path(&fixture.canonicalize().unwrap()));
         let child_folder = fixture.join("a-subfolder");
         let second_folder = fixture.join("b-subfolder");
         fs::create_dir_all(&child_folder).unwrap();

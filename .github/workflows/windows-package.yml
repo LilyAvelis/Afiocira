@@ -46,6 +46,8 @@ jobs:
           $env:PATH = "$(Resolve-Path target/package-2.5.0/yazi);$env:PATH"
           New-Item -ItemType Directory -Force target/debug/deps/fonts | Out-Null
           Copy-Item target/package-2.5.0/fonts/* target/debug/deps/fonts
+          New-Item -ItemType Directory -Force target/debug/deps/yazi | Out-Null
+          Copy-Item target/package-2.5.0/yazi/* target/debug/deps/yazi
           cargo build --locked -p photo-cli
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo test --locked --workspace
