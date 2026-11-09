@@ -9,7 +9,24 @@ use std::{
 };
 
 const MAX_FILE: usize = 64 * 1024 * 1024;
-const MAX_WORK: u64 = 256 * 1024 * 1024;
+// Full-resolution editing needs several live buffers. 256 MiB rejected ordinary
+// 4K/12 MP photos even when ample memory was available; retain a finite budget.
+const MAX_WORK: u64 = 1024 * 1024 * 1024;
+
+fn check_working_memory(encoded_bytes: usize, pixels: u64) -> Result<(), String> {
+    let estimate = (encoded_bytes as u64)
+        .saturating_mul(2)
+        .saturating_add(pixels.saturating_mul(32))
+        .saturating_add(16 * 1024 * 1024);
+    if pixels == 0 || pixels > 32_000_000 || estimate > MAX_WORK {
+        return Err(format!(
+            "Изображение слишком велико для редактирования: оценка памяти {} МиБ, лимит {} МиБ, не более 32 мегапикселей. Оригинал не изменён.",
+            estimate.div_ceil(1024 * 1024),
+            MAX_WORK / (1024 * 1024)
+        ));
+    }
+    Ok(())
+}
 pub(super) struct PreviewBase {
     pixels: DynamicImage,
     scale: f32,
@@ -50,12 +67,7 @@ pub(super) fn prepare_preview(
     let mut decoder = reader.into_decoder().map_err(|e| e.to_string())?;
     let (w, h) = decoder.dimensions();
     let count = u64::from(w) * u64::from(h);
-    if count == 0
-        || count > 32_000_000
-        || bytes.len() as u64 * 2 + count * 32 + 16 * 1024 * 1024 > MAX_WORK
-    {
-        return Err("Adjustment working memory exceeds the 256 MiB limit".into());
-    }
+    check_working_memory(bytes.len(), count)?;
     let color = decoder.color_type();
     if color.bits_per_pixel() / u16::from(color.channel_count()) != 8 {
         return Err("Adjustments support 8-bit still images only; original unchanged".into());
@@ -196,12 +208,7 @@ pub fn process(
     let count = u64::from(w) * u64::from(h);
     // Include metadata copies, encoder buffers, decoded verification and its
     // lossless RGBA comparison, rather than budgeting just the initial decode.
-    if count == 0
-        || count > 32_000_000
-        || original.len() as u64 * 2 + count * 32 + 16 * 1024 * 1024 > MAX_WORK
-    {
-        return Err("Adjustment working memory exceeds the 256 MiB limit".into());
-    }
+    check_working_memory(original.len(), count)?;
     let color = decoder.color_type();
     if color.bits_per_pixel() / u16::from(color.channel_count()) != 8 {
         return Err("Adjustments support 8-bit still images only; original unchanged".into());
@@ -278,6 +285,14 @@ pub fn process(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ordinary_large_photos_fit_but_working_memory_remains_bounded() {
+        assert!(check_working_memory(12 * 1024 * 1024, 4096 * 4096).is_ok());
+        assert!(check_working_memory(12 * 1024 * 1024, 6000 * 4000).is_ok());
+        assert!(check_working_memory(64 * 1024 * 1024, 32_000_000).is_err());
+        assert!(check_working_memory(1, u64::MAX).is_err());
+        assert!(check_working_memory(1, 0).is_err());
+    }
     #[test]
     fn jpeg_xmp_survives_photometric_edit_and_source_preview_is_read_only() {
         let dir = std::env::temp_dir().join(format!("afio-xmp-edit-{}", std::process::id()));

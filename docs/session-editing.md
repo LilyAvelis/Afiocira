@@ -135,7 +135,7 @@ This is a conservative sRGB editor, not a color-managed RAW pipeline. ICC-bearin
 images, custom PNG color encoding, unsupported metadata, animation and high
 precision are refused without changing the source. Existing metadata guards
 preserve supported PNG chunks and JPEG EXIF, normalize orientation and detach
-obsolete embedded thumbnails. File size, dimensions and an estimated 256 MiB
+obsolete embedded thumbnails. File size, dimensions and an estimated 1 GiB
 working-memory budget bound processing; the memory bound can reject large photos
 below the absolute pixel limit. No masks, local brushes or live GPU preview is
 claimed.

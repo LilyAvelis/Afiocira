@@ -8,6 +8,7 @@ pub enum ActionId {
     Undo,
     Redo,
     CommitHistory,
+    EditImage,
     AdjustImage,
     AdjustDetails,
     AdjustVignette,
@@ -37,6 +38,47 @@ pub enum ActionId {
     PlayPause,
     CopyVideoFrame,
     SaveVideoFrame,
+}
+/// Single registration list for individual adjustment tools and the aggregate editor.
+/// Each tool renders its controls when `shows_adjustment_tool` selects it.
+pub struct AdjustmentTool {
+    pub action: ActionId,
+    pub title: &'static str,
+    pub label: &'static str,
+}
+pub const ADJUSTMENT_TOOLS: &[AdjustmentTool] = &[
+    AdjustmentTool {
+        action: ActionId::AdjustImage,
+        title: "Свет и цвет",
+        label: "Свет и цвет…",
+    },
+    AdjustmentTool {
+        action: ActionId::AdjustDetails,
+        title: "Детали",
+        label: "Детали…",
+    },
+    AdjustmentTool {
+        action: ActionId::AdjustVignette,
+        title: "Виньетка",
+        label: "Виньетка…",
+    },
+];
+impl ActionId {
+    pub fn is_adjustment_tool(self) -> bool {
+        self == Self::EditImage || ADJUSTMENT_TOOLS.iter().any(|tool| tool.action == self)
+    }
+    pub fn shows_adjustment_tool(self, tool: Self) -> bool {
+        ADJUSTMENT_TOOLS
+            .iter()
+            .any(|registered| registered.action == tool)
+            && (self == Self::EditImage || self == tool)
+    }
+    pub fn adjustment_title(self) -> &'static str {
+        ADJUSTMENT_TOOLS
+            .iter()
+            .find(|tool| tool.action == self)
+            .map_or("Редактирование", |tool| tool.title)
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionInfo {
@@ -119,9 +161,10 @@ pub fn available(context: &Context) -> Vec<ActionInfo> {
         add(FlipVertical, "Отразить по вертикали", "Изображение", "");
         add(ResizeImage, "Размер и вес…", "Изображение", "");
         add(ConvertImage, "Конвертировать формат…", "Изображение", "");
-        add(AdjustImage, "Свет и цвет…", "Редактирование", "");
-        add(AdjustDetails, "Детали…", "Редактирование", "");
-        add(AdjustVignette, "Виньетка…", "Редактирование", "");
+        add(EditImage, "Редактирование…", "Редактирование", "");
+        for tool in ADJUSTMENT_TOOLS {
+            add(tool.action, tool.label, "Редактирование", "");
+        }
         add(History, "История…", "Изображение", "Ctrl H");
         add(Undo, "Предыдущая версия", "История", "Ctrl Z");
         add(Redo, "Следующая версия", "История", "Ctrl Shift Z");
@@ -222,6 +265,7 @@ mod tests {
             marked: false,
         };
         let tools = [
+            ActionId::EditImage,
             ActionId::AdjustImage,
             ActionId::AdjustDetails,
             ActionId::AdjustVignette,
@@ -233,6 +277,26 @@ mod tests {
                     .any(|a| a.id == id && a.group == "Редактирование")
             );
         }
+        let editing = available(&context)
+            .into_iter()
+            .filter(|action| action.group == "Редактирование")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            editing.iter().map(|action| action.id).collect::<Vec<_>>(),
+            tools
+        );
+        assert!(editing.iter().all(|action| action.shortcut.is_empty()));
+        for tool in ADJUSTMENT_TOOLS {
+            assert!(ActionId::EditImage.shows_adjustment_tool(tool.action));
+            assert!(tool.action.shows_adjustment_tool(tool.action));
+            for other in ADJUSTMENT_TOOLS {
+                assert_eq!(
+                    tool.action.shows_adjustment_tool(other.action),
+                    tool.action == other.action
+                );
+            }
+        }
+        assert!(!ActionId::EditImage.shows_adjustment_tool(ActionId::Settings));
         context.space = false;
         assert!(available(&context).iter().all(|a| !tools.contains(&a.id)));
     }

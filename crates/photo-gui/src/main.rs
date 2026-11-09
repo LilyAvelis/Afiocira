@@ -304,6 +304,9 @@ impl eframe::App for Workshop {
         if let Some(error) = self.yazi.as_mut().and_then(YaziPane::take_navigation_error) {
             self.message = error;
         }
+        // Route the workspace key before any toolbar TextEdit/Button can consume
+        // it for egui focus traversal. Modal editors still own their own Tab.
+        self.pane_switch_keys(&ctx);
         if !self.palette_shortcut_input(&ctx) {
             self.global_action_keys(&ctx);
         }
@@ -330,7 +333,6 @@ impl eframe::App for Workshop {
         }
         ctx.request_repaint_after(Duration::from_millis(100));
         ui.add_space(8.0);
-        let mut path_input_focused = false;
         ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new("Afio").strong().size(19.0));
             ui.separator();
@@ -354,7 +356,6 @@ impl eframe::App for Workshop {
                     .id(egui::Id::new("folder-path"))
                     .desired_width((ui.available_width() - 220.0).clamp(100.0, 430.0)),
             );
-            path_input_focused = input.has_focus();
             let submit = ui
                 .add(egui::Button::image_and_text(
                     Lucide::FolderOpen.size(16.0).image(),
@@ -379,39 +380,17 @@ impl eframe::App for Workshop {
             if ui.button("Поиск · Ctrl Shift K").clicked() {
                 self.execute(Command::ShowSearch);
             }
-            ui.label(&self.message);
+            ui.add(egui::Label::new(&self.message).truncate())
+                .on_hover_text(&self.message);
             if let Some(error) = &self.api_error {
-                ui.colored_label(Color32::YELLOW, error);
+                ui.add(
+                    egui::Label::new(egui::RichText::new(error).color(Color32::YELLOW)).truncate(),
+                )
+                .on_hover_text(error);
             }
         });
         ui.add_space(8.0);
         ui.separator();
-        let yazi_running = self.yazi.as_mut().is_some_and(YaziPane::is_running);
-        if yazi_running
-            && !path_input_focused
-            && !self.search.snapshot.open
-            && !self.palette.open
-            && self.image_dialog.is_none()
-            && self.rename_dialog.is_none()
-            && self.delete_dialog.is_none()
-            && self.adjustments_panel.is_none()
-            && !self.metadata_panel.is_open()
-            && !self.history_panel.open
-            && consume_plain_tab(&ctx)
-        {
-            match self.active_pane {
-                ActivePane::Yazi => {
-                    self.execute(Command::FocusPane {
-                        pane: Pane::Gallery,
-                    });
-                }
-                ActivePane::Gallery => {
-                    self.execute(Command::FocusPane {
-                        pane: Pane::Navigator,
-                    });
-                }
-            }
-        }
         let mut restart_yazi = false;
         let mut terminal_has_focus = false;
         if self.navigator_rendered()
@@ -584,8 +563,38 @@ fn release_keyboard_focus(ui: &egui::Ui) {
         }
     });
 }
+impl Workshop {
+    fn pane_switch_keys(&mut self, ctx: &egui::Context) {
+        if self.settings.open
+            || self.search.snapshot.open
+            || self.palette.open
+            || self.image_dialog.is_some()
+            || self.rename_dialog.is_some()
+            || self.delete_dialog.is_some()
+            || self.adjustments_panel.is_some()
+            || self.metadata_panel.is_open()
+            || self.history_panel.open
+            || !self.yazi.as_mut().is_some_and(YaziPane::is_running)
+        {
+            return;
+        }
+        if consume_plain_tab(ctx) {
+            ctx.memory_mut(|memory| {
+                if let Some(id) = memory.focused() {
+                    memory.surrender_focus(id);
+                }
+            });
+            self.execute(Command::FocusPane {
+                pane: match self.active_pane {
+                    ActivePane::Yazi => Pane::Gallery,
+                    ActivePane::Gallery => Pane::Navigator,
+                },
+            });
+        }
+    }
+}
 fn consume_plain_tab(ctx: &egui::Context) -> bool {
-    ctx.input_mut(|input| {
+    let pressed = ctx.input_mut(|input| {
         let pressed = input.events.iter().any(|event| {
             matches!(event, egui::Event::Key { key: Key::Tab, pressed: true, modifiers, .. } if modifiers.is_none())
         });
@@ -595,7 +604,13 @@ fn consume_plain_tab(ctx: &egui::Context) -> bool {
             });
         }
         pressed
-    })
+    });
+    if pressed {
+        // egui records focus traversal at begin_pass, before widgets see the
+        // event. Removing the event alone cannot cancel that queued traversal.
+        ctx.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+    }
+    pressed
 }
 fn grid_destination(current: usize, count: usize, columns: usize, key: Key) -> usize {
     if count == 0 {
@@ -722,5 +737,34 @@ mod tests {
         assert_eq!(ctx.input(|input| input.events.len()), 1);
         assert!(ctx.input(|input| matches!(&input.events[0], egui::Event::Key { modifiers, .. } if modifiers.shift)));
         ctx.end_pass().textures_delta.clear();
+    }
+    #[test]
+    fn workspace_tab_is_available_before_toolbar_text_and_buttons() {
+        let ctx = egui::Context::default();
+        let path_id = egui::Id::new("folder-path");
+        let mut path = "C:\\synthetic".to_owned();
+        for focused in [path_id, egui::Id::new("toolbar-button")] {
+            ctx.memory_mut(|memory| memory.request_focus(focused));
+            let _ = ctx.run(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: Key::Tab,
+                        physical_key: Some(Key::Tab),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+                |ctx| {
+                    assert!(consume_plain_tab(ctx));
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        ui.add(egui::TextEdit::singleline(&mut path).id(path_id));
+                        ui.button("Open").clicked();
+                        assert!(!ctx.input(|i| i.key_pressed(Key::Tab)));
+                    });
+                },
+            );
+        }
     }
 }

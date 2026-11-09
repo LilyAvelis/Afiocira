@@ -111,7 +111,7 @@ impl Workshop {
                 } else if self.errors.contains_key(&index) {
                     "Cannot preview"
                 } else {
-                    "Loading…"
+                    ""
                 };
                 ui.painter_at(cell).text(
                     cell.center(),

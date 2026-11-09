@@ -5,11 +5,7 @@ use photo_core::actions::ActionId;
 use photo_core::adjustments::{AdjustmentOptions, CurvePoint, PreviewState};
 
 fn tool_title(tool: ActionId) -> &'static str {
-    match tool {
-        ActionId::AdjustDetails => "Детали",
-        ActionId::AdjustVignette => "Виньетка",
-        _ => "Свет и цвет",
-    }
+    tool.adjustment_title()
 }
 
 fn is_neutral(options: &AdjustmentOptions) -> bool {
@@ -204,25 +200,31 @@ impl Workshop {
         if let Some(result) = d.worker.poll() {
             if result.path != d.source
                 || result.source_version != d.version
-                || result.revision != d.requested_revision
+                || result.revision > d.requested_revision
+                || (result.image.is_err() && result.revision != d.requested_revision)
+                || d.ready_revision
+                    .is_some_and(|ready| result.revision <= ready)
             {
                 return;
             }
             match result.image {
                 Ok(image) => {
-                    d.texture = Some(self.ctx.load_texture(
-                        format!("adjustment-live-{}", result.revision),
-                        image,
-                        TextureOptions::LINEAR,
-                    ));
+                    if let Some(texture) = &mut d.texture {
+                        texture.set(image, TextureOptions::LINEAR);
+                    } else {
+                        d.texture = Some(self.ctx.load_texture(
+                            "adjustment-live",
+                            image,
+                            TextureOptions::LINEAR,
+                        ));
+                    }
                     d.ready_revision = Some(result.revision);
                     d.error = None;
                 }
                 Err(error) => {
                     d.finish_requested = false;
                     d.error = Some(error);
-                    d.texture = None;
-                    d.ready_revision = None;
+                    // Retain the last usable image while reporting a failure.
                 }
             }
         }
@@ -346,12 +348,6 @@ impl Workshop {
                 );
                 egui::Panel::bottom("adjustment-commit").show(ui, |ui| {
                     ui.separator();
-                    if d.error.is_none() && d.ready_revision != Some(d.requested_revision) {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.weak("Обновляем изображение…");
-                        });
-                    }
                     if let Some(error) = &d.error {
                         crate::ui_foundation::message(ui, error, true);
                     }
@@ -389,7 +385,7 @@ impl Workshop {
                         if d.finish_requested {
                             ui.disable();
                         }
-                        if d.tool == ActionId::AdjustImage {
+                        if d.tool.shows_adjustment_tool(ActionId::AdjustImage) {
                             egui::CollapsingHeader::new("Свет · 7")
                                 .default_open(true)
                                 .show(ui, |ui| {
@@ -467,7 +463,7 @@ impl Workshop {
                                 }
                             });
                         }
-                        if d.tool == ActionId::AdjustDetails {
+                        if d.tool.shows_adjustment_tool(ActionId::AdjustDetails) {
                             for (label, description, value) in [
                                 ("Резкость", "Мелкие контуры", &mut d.options.sharpness),
                                 ("Чёткость", "Локальный контраст", &mut d.options.definition),
@@ -480,7 +476,7 @@ impl Workshop {
                                 adjustment_slider(ui, label, description, value, 0.0..=1.0);
                             }
                         }
-                        if d.tool == ActionId::AdjustVignette {
+                        if d.tool.shows_adjustment_tool(ActionId::AdjustVignette) {
                             adjustment_slider(
                                 ui,
                                 "Виньетка",
@@ -489,7 +485,7 @@ impl Workshop {
                                 0.0..=1.0,
                             );
                         }
-                        if d.tool == ActionId::AdjustImage {
+                        if d.tool.shows_adjustment_tool(ActionId::AdjustImage) {
                             ui.checkbox(&mut d.curve_enabled, "Тоновая кривая");
                             if d.curve_enabled {
                                 for (index, label) in

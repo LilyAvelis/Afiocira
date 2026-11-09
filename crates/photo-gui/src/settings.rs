@@ -467,9 +467,7 @@ impl Workshop {
                                             request =
                                                 Some(photo_core::settings::YaziRequest::Discard);
                                         }
-                                        if busy {
-                                            ui.spinner();
-                                        } else if dirty {
+                                        if dirty {
                                             ui.weak("Есть неприменённые изменения");
                                         } else {
                                             ui.weak("Изменения применены");

@@ -781,7 +781,7 @@ impl Workshop {
             warnings: Vec::new(),
             timing: None,
         });
-        self.message = "Выполняется…".into();
+        self.message.clear();
         Ok(())
     }
     pub(super) fn poll_operations(&mut self, ctx: &egui::Context) {

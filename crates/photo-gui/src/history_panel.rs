@@ -268,10 +268,9 @@ impl Workshop {
             ui.weak("Текущая сессия · SSD");
             ui.horizontal_wrapped(|ui| {
                 if ui.button("Закрыть").clicked() { command=Some(Command::CloseHistory); }
-                if busy { ui.spinner(); }
             });
             if let Some(error) = &state.error { crate::ui_foundation::message(ui,error,true); }
-            let Some(snapshot) = &state.snapshot else { ui.spinner(); return; };
+            let Some(snapshot) = &state.snapshot else { return; };
             ui.horizontal_wrapped(|ui| {
                 if ui.add_enabled(!busy && snapshot.can_undo,egui::Button::new("Назад · Ctrl Z")).clicked() { command=Some(Command::UndoHistory); }
                 if ui.add_enabled(!busy && snapshot.can_redo,egui::Button::new("Вперёд · Ctrl Shift Z")).clicked() { command=Some(Command::RedoHistory); }
@@ -300,7 +299,7 @@ impl Workshop {
                                         let size=texture.size_vec2();
                                         let scale=(thumbnail_width/size.x).min(88.0/size.y).min(1.0);
                                         ui.centered_and_justified(|ui| { ui.add(egui::Image::new(texture).fit_to_exact_size(size*scale)); });
-                                    } else { ui.centered_and_justified(|ui| { ui.weak(if failure.is_some() { "Нет превью" } else { "Загрузка…" }); }); }
+                                    } else if failure.is_some() { ui.centered_and_justified(|ui| { ui.weak("Нет превью"); }); }
                                 });
                                 ui.vertical(|ui| {
                                     ui.set_width(ui.available_width());

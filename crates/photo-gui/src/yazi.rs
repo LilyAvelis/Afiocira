@@ -194,7 +194,11 @@ return {
         -- fixed delay means emitted commands have run. Explicit state mutations
         -- are idempotent; retries remain inside this same logical request ID.
         local verified = request.operation == "snapshot" or request.operation == "order"
-        for attempt = 1, 100 do
+        -- Opening an Everything result can require loading a large directory.
+        -- Give navigation a bounded five-second observation window, still
+        -- below the host protocol timeout; never acknowledge unobserved state.
+        local attempts = request.operation == "navigate" and 500 or 100
+        for attempt = 1, attempts do
           if verified then break end
           ya.sleep(0.01)
           local cwd, hovered, selected, _, preferences = snapshot()
@@ -226,7 +230,10 @@ return {
             end
           end
         end
-        if not verified then error("Private mutation did not reach its expected Yazi state") end
+        if not verified then
+          local cwd, hovered = snapshot()
+          error("Yazi " .. tostring(request.operation) .. " was not confirmed; cwd=" .. tostring(cwd) .. "; hovered=" .. tostring(hovered))
+        end
         if request.operation == "snapshot" then
           local cwd, hovered, selected, ordered, preferences, tabs, metadata = snapshot()
           local lines = { cwd, hovered, preferences, tostring(tabs), metadata }

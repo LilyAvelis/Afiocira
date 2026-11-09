@@ -291,12 +291,6 @@ impl Workshop {
                     self.search.focus = false;
                 }
                 ui.separator();
-                if self.search.snapshot.opening {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("Открываем папку…");
-                    });
-                }
                 egui::ScrollArea::vertical()
                     .max_height((ctx.content_rect().height() - 240.0).clamp(80.0, 420.0))
                     .show(ui, |ui| {
@@ -315,14 +309,9 @@ impl Workshop {
                                 picked = Some(index);
                             }
                         }
-                        if self.search.snapshot.loading {
-                            ui.horizontal(|ui| {
-                                ui.spinner();
-                                ui.label("Ищем…");
-                            });
-                        } else if let Some(error) = &self.search.snapshot.error {
+                        if let Some(error) = &self.search.snapshot.error {
                             ui.colored_label(Color32::LIGHT_RED, error);
-                        } else if count == 0 {
+                        } else if count == 0 && !self.search.snapshot.loading {
                             ui.label(if query.trim().is_empty() {
                                 "Имена, пути и синтаксис Everything"
                             } else {

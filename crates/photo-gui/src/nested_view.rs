@@ -274,10 +274,7 @@ impl Workshop {
             if let Some(count) = self.nested.snapshot.subfolders {
                 ui.weak(format!("Подпапок на этом уровне: {count}"));
             } else {
-                ui.weak("Считаем подпапки…");
-            }
-            if self.nested.snapshot.loading {
-                ui.spinner();
+                ui.weak("Альбомы");
             }
             if self.album_mode() {
                 ui.add(Lucide::MoveHorizontal.size(14.0).image());

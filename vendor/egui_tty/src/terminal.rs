@@ -3,7 +3,7 @@
 
 use std::{
     sync::{Arc, mpsc},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use egui::{
@@ -91,6 +91,8 @@ pub struct Terminal {
     tty: Arc<dyn Tty>,
     cols: u16,
     rows: u16,
+    /// Wait for layout dimensions to settle before sending another PTY resize.
+    pending_resize: Option<((u16, u16), Instant)>,
     /// What the exit notice calls this terminal, if the host gave it a name.
     label: Option<String>,
     poll_interval: Duration,
@@ -162,6 +164,7 @@ impl Terminal {
             poll_interval: DEFAULT_POLL_INTERVAL,
             exited: false,
             pending_focus: false,
+            pending_resize: None,
             blink_clock: 0.0,
             scroll_remainder: 0.0,
             pointer: selection::Pointer::new()?,
@@ -383,7 +386,28 @@ impl Terminal {
         let rows = ((available.y - 2.0 * padding) / cell.y)
             .floor()
             .max(f32::from(MIN_ROWS)) as u16;
-        report(self.resize(cols, rows, cell));
+        // A splitter/window drag can change columns every frame. Keep drawing
+        // the existing grid (clipped to the pane) until the new size settles,
+        // instead of repeatedly clearing/reflowing the application in the PTY.
+        if (cols, rows) == (self.cols, self.rows) {
+            self.pending_resize = None;
+        } else {
+            let quiet = Duration::from_millis(80);
+            if self
+                .pending_resize
+                .as_ref()
+                .is_none_or(|(size, _)| *size != (cols, rows))
+            {
+                self.pending_resize = Some(((cols, rows), Instant::now()));
+            }
+            let elapsed = self.pending_resize.as_ref().unwrap().1.elapsed();
+            if elapsed >= quiet {
+                report(self.resize(cols, rows, cell));
+                self.pending_resize = None;
+            } else {
+                ui.ctx().request_repaint_after(quiet - elapsed);
+            }
+        }
 
         let (response, painter) = ui.allocate_painter(available, Sense::click_and_drag());
         // Glyph fallback can have wider ink than a terminal cell. Keep it inside

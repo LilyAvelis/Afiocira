@@ -11,9 +11,10 @@ pub(super) fn icon(action: ActionId) -> Lucide {
         ActionId::Undo => Lucide::Undo2,
         ActionId::Redo => Lucide::Redo2,
         ActionId::CommitHistory => Lucide::Save,
-        ActionId::AdjustImage | ActionId::AdjustDetails | ActionId::AdjustVignette => {
-            Lucide::SlidersHorizontal
-        }
+        ActionId::EditImage
+        | ActionId::AdjustImage
+        | ActionId::AdjustDetails
+        | ActionId::AdjustVignette => Lucide::SlidersHorizontal,
         ActionId::RotateLeft => Lucide::RotateCcw,
         ActionId::RotateRight => Lucide::RotateCw,
         ActionId::FlipHorizontal => Lucide::FlipHorizontal2,
@@ -415,9 +416,7 @@ impl Workshop {
                 ui.horizontal_centered(|ui| {
                     ui.add(Lucide::Images.size(17.0).image());
                     let count = self.action_paths().len();
-                    let label = if self.operation.as_ref().is_some_and(|j| j.running) {
-                        "Выполняется…".to_owned()
-                    } else if self
+                    let label = if self
                         .gallery
                         .as_ref()
                         .is_some_and(|g| g.view() == View::Photo)

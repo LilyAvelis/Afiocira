@@ -232,11 +232,7 @@ impl Workshop {
                 });
             }
             ui.separator();
-            if busy {
-                ui.horizontal(|ui| { ui.spinner(); hint(ui, "Обрабатываем изображение…"); });
-            } else {
-                hint(ui, if d.snapshot.convert { "Исходный файл будет заменён." } else { "Сохраним новую копию рядом. Метаданные камеры удаляются." });
-            }
+            hint(ui, if d.snapshot.convert { "Исходный файл будет заменён." } else { "Сохраним новую копию рядом. Метаданные камеры удаляются." });
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(!busy, |ui| {
                     let response = ui.button("Отмена"); cancel |= response.clicked(); controls.push(response.id);

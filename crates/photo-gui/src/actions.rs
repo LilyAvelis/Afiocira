@@ -78,20 +78,22 @@ impl Workshop {
             return Err("Action is not available in this context".into());
         }
         self.close_palette();
-        if matches!(
-            id,
-            ActionId::ConvertImage
-                | ActionId::AdjustImage
-                | ActionId::AdjustDetails
-                | ActionId::AdjustVignette
-                | ActionId::RotateLeft
-                | ActionId::RotateRight
-                | ActionId::FlipHorizontal
-                | ActionId::FlipVertical
-                | ActionId::Rename
-        ) && !self.metadata_panel.close()
+        if (id.is_adjustment_tool()
+            || matches!(
+                id,
+                ActionId::ConvertImage
+                    | ActionId::RotateLeft
+                    | ActionId::RotateRight
+                    | ActionId::FlipHorizontal
+                    | ActionId::FlipVertical
+                    | ActionId::Rename
+            ))
+            && !self.metadata_panel.close()
         {
             return Err("Сохраните или отмените изменения метаданных".into());
+        }
+        if id.is_adjustment_tool() {
+            return self.toggle_adjustment_tool(id);
         }
         match id {
             ActionId::CopyPath | ActionId::CopySelectedPath => {
@@ -128,9 +130,10 @@ impl Workshop {
             ActionId::Undo => self.history_command(photo_core::history::Operation::Undo),
             ActionId::Redo => self.history_command(photo_core::history::Operation::Redo),
             ActionId::CommitHistory => self.history_command(photo_core::history::Operation::Commit),
-            ActionId::AdjustImage | ActionId::AdjustDetails | ActionId::AdjustVignette => {
-                self.toggle_adjustment_tool(id)
-            }
+            ActionId::EditImage
+            | ActionId::AdjustImage
+            | ActionId::AdjustDetails
+            | ActionId::AdjustVignette => unreachable!("adjustment actions dispatched above"),
             ActionId::RotateLeft
             | ActionId::RotateRight
             | ActionId::FlipHorizontal

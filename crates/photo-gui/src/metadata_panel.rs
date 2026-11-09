@@ -396,7 +396,6 @@ impl Panel {
                     self.cancel(); intents.push(Intent::Closed);
                 }
             });
-            if self.busy() { ui.spinner(); }
             if !self.busy() && self.snapshot.is_none() && ui.button("Повторить загрузку").clicked() && let Some(path) = self.target.clone() {
                 self.awaiting_submission = true;
                 self.error = None;

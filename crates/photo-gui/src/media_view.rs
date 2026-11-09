@@ -287,13 +287,14 @@ impl Workshop {
             );
             return;
         }
-        let text = self.errors.get(&index).map_or("Loading…", String::as_str);
-        ui.painter_at(rect).text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            text,
-            egui::FontId::proportional(16.0),
-            Color32::LIGHT_GRAY,
-        );
+        if let Some(text) = self.errors.get(&index) {
+            ui.painter_at(rect).text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                text,
+                egui::FontId::proportional(16.0),
+                Color32::LIGHT_GRAY,
+            );
+        }
     }
 }

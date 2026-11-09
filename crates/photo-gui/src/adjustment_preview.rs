@@ -59,7 +59,6 @@ impl PreviewWorker {
             return;
         }
         state.serial = state.serial.wrapping_add(1);
-        state.result = None;
         state.pending = Some(Request {
             serial: state.serial,
             epoch: state.epoch,
@@ -154,7 +153,11 @@ fn run(shared: Arc<Shared>, ctx: egui::Context) {
         if state.closed {
             return;
         }
-        if state.serial == request.serial && state.epoch == request.epoch {
+        // Keep completed frames flowing during a continuous drag. The single
+        // pending slot still replaces skipped inputs with the newest settings.
+        // Cancellation/source epochs, rather than a newer slider value, make
+        // completed work invalid. Errors belong only to the latest request.
+        if state.epoch == request.epoch && (image.is_ok() || state.serial == request.serial) {
             state.result = Some(PreviewResult {
                 revision: request.revision,
                 path: request.path,
@@ -201,7 +204,9 @@ mod tests {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let result = loop {
             if let Some(result) = worker.poll() {
-                break result;
+                if result.revision == 19 {
+                    break result;
+                }
             }
             assert!(std::time::Instant::now() < deadline, "preview timed out");
             std::thread::sleep(std::time::Duration::from_millis(5));
